@@ -1,0 +1,15 @@
+.mypy_cache
+local-scratchpads
+venv
+.idea
+notebooks/.ipynb_checkpoints
+doc/_build
+build
+dist
+pyzx.egg-info
+*.pyc
+.vscode
+*.class
+*.ipynb_checkpoints
+pyzx/js/d3.v5.js
+*~
