@@ -8,6 +8,10 @@ from pyzx.utils import VertexType, EdgeType
 from .tools import split_phases, insert_identity
 from pyzx.gflow import gflow
 from .gflow_calculation import update_gflow_from_double_insertion, update_gflow_from_lcomp, update_gflow_from_pivot
+from .simplify import get_random_match
+from pyzx.rules import match_ids_parallel, remove_ids, match_spider_parallel, spider
+import math
+import random
 
 
 MatchLcompHeuristicNeighbourType = Tuple[float,Tuple[VT,List[VT],VT]]
@@ -174,6 +178,72 @@ def greedy_wire_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bo
 
     return iterations
 
+def sim_annealing_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, iterations=100, alpha=0.95, cap=-100000, quiet:bool=False, stats=None):
+    temperature = iterations
+    epsilon = 1
+    it = 0
+    gfl = gflow(g)[1]
+    best = g.copy()
+    best_eval = g.num_edges()
+    curr_eval = best_eval
+    backtrack = False
+
+    while temperature > epsilon:
+        it += 1
+        lcomp_matches, pivot_matches = generate_matches(g, gfl=gfl, max_v=max_v, cap=cap) #1-int(temperature)
+        method, match = get_best_match(lcomp_matches, pivot_matches)
+        if match[0] <= 0:
+            if backtrack:
+                g = best.copy()
+                # g = best
+                curr_eval = best_eval
+                backtrack = False
+                gfl = gflow(g)[1]
+                # print("reset to best eval")
+                continue
+            else:
+                method, match = get_random_match(lcomp_matches, pivot_matches)
+                backtrack = True
+                # print("start branch with negative match")
+
+        if method == "none":
+            temperature = 0
+            break
+            # print("best eval ",)
+        theexp = math.exp(match[0]/temperature)
+        # if match[0] <= 0:
+        #     print(match[0], temperature, theexp)
+        if match[0] > 0 or theexp > random.random():
+            curr_eval -= match[0]
+
+            if method == "pivot":
+                apply_pivot(g,match, gfl)
+            else:
+                apply_lcomp(g,match, gfl)
+                
+            if curr_eval < best_eval:
+                best = g.copy()
+                best_eval = curr_eval
+            # temperature *=alpha
+                # print("do not apply rule with cost ",match[0])
+                # continue
+            gfl = gflow(g)[1]
+            # print("best eval ",best_eval,"curr ",curr_eval,"match ",match[0])
+        # else:
+        #     print("theexp fail ",match[0], temperature, theexp)
+
+        # h_cost -= match[0]
+        temperature *= alpha
+        # print("apply rule with cost ",match[0])
+        # print(temperature)
+        
+        # remove_ids(g, match_ids_parallel(g))
+        # spider(g, match_spider_parallel(g))
+    print("final num edges: ",best.num_edges())
+    return best
+
+
+
 def apply_best_match(g, lcomp_matches, pivot_matches, gfl):
     lcomp_matches.sort(key= lambda m: m[0],reverse=True)
     pivot_matches.sort(key= lambda m: m[0],reverse=True)
@@ -194,3 +264,44 @@ def apply_best_match(g, lcomp_matches, pivot_matches, gfl):
     else:
         apply_lcomp(g,lcomp_matches[0], gfl)
     return True
+
+def get_best_match(lcomp_matches, pivot_matches):
+    lcomp_matches.sort(key= lambda m: m[0],reverse=True)
+    pivot_matches.sort(key= lambda m: m[0],reverse=True)
+    method = "pivot"
+
+    if len(lcomp_matches) > 0:
+        if len(pivot_matches) > 0:
+            if lcomp_matches[0][0] > pivot_matches[0][0]:
+                method = "lcomp"      
+        else:
+            method = "lcomp"
+    else:
+        if len(pivot_matches) == 0:
+            return ("none",None)
+
+    if method == "pivot":
+        return ("pivot", pivot_matches[0])
+    else:
+        return ("lcomp", lcomp_matches[0])
+
+# def get_random_match(g, lcomp_matches, pivot_matches, gfl):
+#     lcomp_matches.sort(key= lambda m: m[0],reverse=True)
+#     pivot_matches.sort(key= lambda m: m[0],reverse=True)
+#     method = "pivot"
+
+#     if len(lcomp_matches) > 0:
+#         if len(pivot_matches) > 0:
+#             if lcomp_matches[0][0] > pivot_matches[0][0]:
+#                 method = "lcomp"      
+#         else:
+#             method = "lcomp"
+#     else:
+#         if len(pivot_matches) == 0:
+#             return False
+
+#     if method == "pivot":
+#         apply_pivot(g,pivot_matches[0], gfl)
+#     else:
+#         apply_lcomp(g,lcomp_matches[0], gfl)
+#     return True
