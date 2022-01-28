@@ -4,7 +4,7 @@ from .heuristics import get_phase_type, lcomp_heuristic, pivot_heuristic, lcomp_
 from pyzx.graph.base import BaseGraph, VT, ET
 from typing import Tuple, List
 from pyzx.utils import VertexType, EdgeType
-from .tools import split_phases, insert_identity
+from .tools import split_phases, insert_identity, insert_phase_gadget
 import math
 import random
 
@@ -261,11 +261,3 @@ def apply_pivot(g: BaseGraph[VT,ET], match):
             
     apply_rule(g, pivot, [(v1,v2,[],[])])
 
-
-def insert_phase_gadget(g,vertex,desired_phase):
-    new_phase = split_phases(g.phases()[vertex], desired_phase)
-    gadget_top = g.add_vertex(VertexType.Z,-2,g.rows()[vertex],new_phase)
-    g.set_phase(vertex, desired_phase)
-    g.add_edge((vertex,gadget_top), EdgeType.SIMPLE)
-    v_mid = insert_identity(g,vertex,gadget_top)  
-    return (v_mid, gadget_top)
