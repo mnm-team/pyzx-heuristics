@@ -32,3 +32,12 @@ def insert_identity(g, v1, v2) -> int:
     else:
         g.add_edge((vmid,v2), EdgeType.HADAMARD)
     return vmid
+
+
+def insert_phase_gadget(g,vertex,desired_phase):
+    new_phase = split_phases(g.phases()[vertex], desired_phase)
+    gadget_top = g.add_vertex(VertexType.Z,-2,g.rows()[vertex],new_phase)
+    g.set_phase(vertex, desired_phase)
+    g.add_edge((vertex,gadget_top), EdgeType.SIMPLE)
+    v_mid = insert_identity(g,vertex,gadget_top)  
+    return (v_mid, gadget_top)
