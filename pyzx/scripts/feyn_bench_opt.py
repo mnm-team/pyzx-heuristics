@@ -74,8 +74,8 @@ def evaluate_circuit(path, name, todd=False):
             c_opt, time_opt = evaluate_strategy(c_basic_opt, strategy, params)
             stats.append(generate_stat_entry(c_opt, strategy, time_opt, params))
 
-        if c_opt.twoqubitcount() < best_circuit.twoqubitcount():
-            best_circuit = c_opt
+            if c_opt.twoqubitcount() < best_circuit.twoqubitcount():
+                best_circuit = c_opt
     
     return (best_circuit, stats)
 
