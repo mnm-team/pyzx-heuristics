@@ -5,10 +5,12 @@
 # Output: 
 # (name, )
 
+import os
 import sys; sys.path.append('../..')
 import pyzx as zx
 import pickle
 
+import datetime
 import time
 
 def save_obj(obj, name):
@@ -49,25 +51,51 @@ def evaluate_strategy(circuit, strategy, params = {}):
 def generate_stat_entry(circuit, strategy, time = -1, params = {}):
     return {'strategy': strategy, '1-qubit': len(circuit.gates), '2-qubit': circuit.twoqubitcount(), 'T-gates': circuit.tcount(), 'time': time, 'params': str(params)}
 
-def evaluate_circuit(name):
+def evaluate_circuit(path, name, todd=False):
     stats = []
-    circuit = zx.Circuit.load(name).to_basic_gates()
+    circuit = zx.Circuit.load(os.path.join(path,name)).to_basic_gates()
     stats.append(generate_stat_entry(circuit, 'original'))
-    c_basic_opt = zx.optimize.basic_optimization(circuit)
+
+    if todd:
+        c_basic_opt = zx.optimize.full_optimize(circuit)
+    else:
+        c_basic_opt = zx.optimize.basic_optimization(circuit)
+        
     stats.append(generate_stat_entry(c_basic_opt, 'basic_opt'))
-    best_circuit = c_basic_opt
-    for strategy in ['pyzx', 'greedy_simp', 'random_simp', 'greedy_simp_neighbors', "random_simp_neighbors"]:
-        params = {'cap': 1, 'max_v': False}
-        c_opt, time_opt = evaluate_strategy(c_basic_opt, strategy, params)
-        stats.append(generate_stat_entry(c_opt, strategy, time_opt, params))
+
+    c_opt, time_opt = evaluate_strategy(c_basic_opt, 'pyzx')
+    stats.append(generate_stat_entry(c_opt, 'pyzx', time_opt))
+    best_circuit = c_opt
+
+    for strategy in ['greedy_simp', 'random_simp', 'greedy_simp_neighbors', 'random_simp_neighbors']:
+        for cap in [1, -5, -20]:
+            print("evaluate strategy ",strategy)
+            params = {'cap': cap, 'max_v': False if cap == 1 else True}
+            c_opt, time_opt = evaluate_strategy(c_basic_opt, strategy, params)
+            stats.append(generate_stat_entry(c_opt, strategy, time_opt, params))
 
         if c_opt.twoqubitcount() < best_circuit.twoqubitcount():
             best_circuit = c_opt
     
-    save_obj(stats, name+'_stats')
-    f = open(name+'_after', 'w')
-    f.write(best_circuit.to_qasm())
-    f.close()
+    return (best_circuit, stats)
+
+def evaluate_folder(folder):
+    source_folder = folder + 'before/'
+    dest_folder = folder + 'after/'
+    stats_folder = folder + 'stats/'
+    list_of_files = filter( lambda x: os.path.isfile(os.path.join(source_folder, x)),os.listdir(source_folder) )
+    list_of_files = sorted( list_of_files, key =  lambda x: os.stat(os.path.join(source_folder,x)).st_size)
+    for file in list_of_files:
+        print("evaluate circuit ",file, " at ",datetime.datetime.now())
+        for todd in [False, True]:
+            best_circuit, stats = evaluate_circuit(source_folder, file, todd)
+
+            filename = file + '_t' if todd else file
+            save_obj(stats, os.path.join(stats_folder,filename))
+            f = open(os.path.join(dest_folder,filename), 'w')
+            f.write(best_circuit.to_qasm())
+            f.close()
 
 if __name__ == "__main__":
-    evaluate_circuit(name=sys.argv[1])
+    evaluate_folder(sys.argv[1])
+    # evaluate_circuit(name=sys.argv[1])
