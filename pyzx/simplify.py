@@ -31,7 +31,7 @@ from typing import List, Callable, Optional, Union, Generic, Tuple, Dict, Iterat
 from .utils import EdgeType, VertexType, toggle_edge, vertex_is_zx, toggle_vertex
 from .rules import *
 from .heuristics.simplify import greedy_wire_reduce, random_wire_reduce, simulated_annealing_reduce
-from .heuristics.neighbor_unfusion import greedy_wire_reduce_neighbor, sim_annealing_reduce_neighbor
+from .heuristics.neighbor_unfusion import greedy_wire_reduce_neighbor, sim_annealing_reduce_neighbor, random_wire_reduce_neighbor
 from .graph.base import BaseGraph, VT, ET
 from .circuit import Circuit
 
@@ -238,6 +238,20 @@ def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bool=Tru
         i1 = id_simp(g, quiet=quiet, stats=stats)
         i2 = spider_simp(g, quiet=quiet, stats=stats) 
         i3 = greedy_wire_reduce_neighbor(g,max_v=max_v, cap=cap, quiet=quiet, stats=stats)
+            
+        if i1+i2+i3==0: break
+        i += 1
+    return i
+
+def random_simp_neighbors(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+    spider_simp(g, quiet=quiet, stats=stats)
+    to_gh(g)
+    i = 0
+    max_v = len(g.vertex_set()) if max_v else None
+    while True:
+        i1 = id_simp(g, quiet=quiet, stats=stats)
+        i2 = spider_simp(g, quiet=quiet, stats=stats) 
+        i3 = random_wire_reduce_neighbor(g,max_v=max_v, cap=cap, quiet=quiet, stats=stats)
             
         if i1+i2+i3==0: break
         i += 1

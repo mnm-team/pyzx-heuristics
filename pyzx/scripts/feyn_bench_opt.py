@@ -29,8 +29,8 @@ def evaluate_strategy(circuit, strategy, params = {}):
         zx.simplify.greedy_simp(g, cap=params['cap'], max_v=params['max_v'])
     elif strategy == "random_simp":
         zx.simplify.random_simp(g, cap=params['cap'], max_v=params['max_v'])
-    # elif strategy == "random_simp_neighbors":
-    #     zx.simplify.random_simp_neighbors(g, params['boundaries'], params['gadgets'], params['cap'], params['max_v'])
+    elif strategy == "random_simp_neighbors":
+        zx.simplify.random_simp_neighbors(g, params['cap'], params['max_v'])
     elif strategy == "greedy_simp_neighbors":
         zx.simplify.greedy_simp_neighbors(g, params['cap'], params['max_v'])
 
@@ -56,7 +56,7 @@ def evaluate_circuit(name):
     c_basic_opt = zx.optimize.basic_optimization(circuit)
     stats.append(generate_stat_entry(c_basic_opt, 'basic_opt'))
     best_circuit = c_basic_opt
-    for strategy in ['pyzx', 'greedy_simp', 'random_simp', 'greedy_simp_neighbors' ]: #,random_simp_neighbors
+    for strategy in ['pyzx', 'greedy_simp', 'random_simp', 'greedy_simp_neighbors', "random_simp_neighbors"]:
         params = {'cap': 1, 'max_v': False}
         c_opt, time_opt = evaluate_strategy(c_basic_opt, strategy, params)
         stats.append(generate_stat_entry(c_opt, strategy, time_opt, params))

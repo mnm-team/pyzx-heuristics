@@ -178,6 +178,22 @@ def greedy_wire_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bo
 
     return iterations
 
+def random_wire_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bool=False, stats=None):
+    changes = True
+    iterations = 0
+    gfl = gflow(g)[1]
+    while changes:
+        changes = False
+        lcomp_matches, pivot_matches = generate_matches(g, gfl=gfl, max_v=max_v, cap=cap)
+        if apply_random_match(g, lcomp_matches, pivot_matches, gfl):
+            iterations += 1
+            changes = True
+            gfl = gflow(g)[1]
+        else:
+            continue
+
+    return iterations
+
 def sim_annealing_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, iterations=100, alpha=0.95, cap=-100000, quiet:bool=False, stats=None):
     temperature = iterations
     epsilon = 1
@@ -242,7 +258,36 @@ def sim_annealing_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, iterations=10
     print("final num edges: ",best.num_edges())
     return best
 
+def apply_random_match(g, lcomp_matches, pivot_matches, gfl):
+    method, match = get_random_match(lcomp_matches, pivot_matches)
 
+    if method == "pivot":
+        apply_pivot(g,match, gfl)
+    elif method == "lcomp":
+        apply_lcomp(g,match, gfl)
+    else:
+        return False
+    return True
+
+# def apply_random_match(g, lcomp_matches, pivot_matches, gfl):
+#     # lcomp_matches.sort(key= lambda m: m[0],reverse=True)
+#     # pivot_matches.sort(key= lambda m: m[0],reverse=True)
+#     method = "pivot"
+
+#     if len(lcomp_matches) > 0:
+#         if len(pivot_matches) > 0:
+#             method = "lcomp" if random.random() < 0.5 else "pivot"    
+#         else:
+#             method = "lcomp"
+#     else:
+#         if len(pivot_matches) == 0:
+#             return False
+
+#     if method == "pivot":
+#         apply_pivot(g,pivot_matches[0], gfl)
+#     else:
+#         apply_lcomp(g,lcomp_matches[0], gfl)
+#     return True
 
 def apply_best_match(g, lcomp_matches, pivot_matches, gfl):
     lcomp_matches.sort(key= lambda m: m[0],reverse=True)
@@ -284,24 +329,3 @@ def get_best_match(lcomp_matches, pivot_matches):
         return ("pivot", pivot_matches[0])
     else:
         return ("lcomp", lcomp_matches[0])
-
-# def get_random_match(g, lcomp_matches, pivot_matches, gfl):
-#     lcomp_matches.sort(key= lambda m: m[0],reverse=True)
-#     pivot_matches.sort(key= lambda m: m[0],reverse=True)
-#     method = "pivot"
-
-#     if len(lcomp_matches) > 0:
-#         if len(pivot_matches) > 0:
-#             if lcomp_matches[0][0] > pivot_matches[0][0]:
-#                 method = "lcomp"      
-#         else:
-#             method = "lcomp"
-#     else:
-#         if len(pivot_matches) == 0:
-#             return False
-
-#     if method == "pivot":
-#         apply_pivot(g,pivot_matches[0], gfl)
-#     else:
-#         apply_lcomp(g,lcomp_matches[0], gfl)
-#     return True
