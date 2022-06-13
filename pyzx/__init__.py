@@ -33,7 +33,6 @@ from .circuit.sqasm import sqasm
 from . import quantomatic
 from . import generate
 from . import todd
-from . import topt
 from . import linalg
 from . import extract
 from . import rules
