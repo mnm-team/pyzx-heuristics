@@ -43,14 +43,14 @@ parser.add_argument('-o',type=str,default='match', dest='outformat',
     help='Specify the output format (qasm, qc, quipper). By default matches the input')
 parser.add_argument('-v',default=False, action='store_true', dest='verbose',
     help='Output verbose information')
-parser.add_argument('-g',type=str,default='none', dest='simp', 
-    help='ZX-simplifier to use. Options are none (default), greedy, greedyn or random or randomn')
-parser.add_argument('-p',default=False, action='store_true', dest='phasepoly',
-    help='Whether to also run the phase-polynomial optimizer (default is false)')
-parser.add_argument('-c',type=int, default=-5, dest='cap',
-    help='Cap for heuristics')
+parser.add_argument('-s',type=str,default='greedy', dest='simp', 
+    help='ZX-simplifier to use. Options are greedy (default), greedyn (greedy + neighbor unfusion), random or randomn (random + neighbor unfusion)')
+parser.add_argument('-p',default=True, action='store_true', dest='phasepoly',
+    help='Whether to also run the phase-polynomial optimizer (default is true)')
+parser.add_argument('-c',type=int, default=1, dest='cap',
+    help='Cap for heuristics; default is 1, i.e. only rules which decrease H-wires are applied')
 parser.add_argument('-maxv',default=False, action='store_true', dest='maxv',
-    help='Maxv for heuristics')
+    help='Maxv for heuristics, has to be true if cap <= 0, otherwise procedure may not terminate')
 
 def main(args):
     print("Starting program")
@@ -72,35 +72,31 @@ def main(args):
     else:
         dest = options.dest
 
-    c = Circuit.load(options.source)
+    c = Circuit.load(options.source).to_basic_gates().split_phase_gates()
     if options.verbose:
         print("Starting circuit:")
-        print(c.to_basic_gates().stats())
-    c = optimize.basic_optimization(c.to_basic_gates())
-    print("c1 ",c.stats())
-    g = c.to_graph()
-    if options.verbose: print("Running simplification algorithm...")
-    g = simplify.teleport_reduce(g,quiet=(not options.verbose))
-    g.track_phases = False
+        print(c.stats())
+    c1 = optimize.basic_optimization(c)
+    print("c1 ",c1.stats())
+    g = c1.to_graph()
+    if options.phasepoly:
+        if options.verbose: print("Running phase teleportation algorithm")
+        g = simplify.teleport_reduce(g,quiet=(not options.verbose))
+        g.track_phases = False
 
-    if options.simp == 'none':
-        c5 = Circuit.from_graph(g)
-    else:
-        # g = c3.to_graph()
-        print("applying simplification strategy ",options.simp)
-        if options.simp == 'greedy':
-            simplify.greedy_simp(g, False, False, quiet=(not options.verbose), cap=options.cap, max_v=options.maxv)
-        if options.simp == 'greedyn':
-            simplify.greedy_simp_neighbors(g,quiet=(not options.verbose), cap=options.cap, max_v=options.maxv)
-        if options.simp == 'random':
-            simplify.random_simp(g,False, False, quiet=(not options.verbose), cap=options.cap, max_v=options.maxv)
-            #TODO: randomn
-        if options.verbose: print("Extracting circuit...")
-        c4 = extract.extract_circuit(g.copy())
-        c5 = optimize.basic_optimization(c4.to_basic_gates()).to_basic_gates().split_phase_gates()
-        print(len(c5.gates),c5.twoqubitcount(), c5.tcount())
-        # if options.verbose: print("Optimizing...")
-        # c5 = optimize.basic_optimization(c4.to_basic_gates())
+    print("Applying simplification strategy ",options.simp)
+    if options.simp == 'greedy':
+        simplify.greedy_simp(g, False, False, quiet=(not options.verbose), cap=options.cap, max_v=options.maxv)
+    if options.simp == 'greedyn':
+        simplify.greedy_simp_neighbors(g,quiet=(not options.verbose), cap=options.cap, max_v=options.maxv)
+    if options.simp == 'random':
+        simplify.random_simp(g,False, False, quiet=(not options.verbose), cap=options.cap, max_v=options.maxv)
+    if options.simp == 'randomn':
+        simplify.random_simp_neighbors(g, quiet=(not options.verbose), cap=options.cap, max_v=options.maxv)
+    if options.verbose: print("Extracting circuit...")
+
+    c4 = extract.extract_circuit(g.copy())
+    c5 = optimize.basic_optimization(c4.to_basic_gates()).to_basic_gates().split_phase_gates()
 
     if options.verbose: print(c5.stats())
     print("Writing output to {}".format(os.path.abspath(dest)))

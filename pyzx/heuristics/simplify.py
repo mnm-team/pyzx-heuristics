@@ -251,7 +251,7 @@ cap (int): Lower bound for heuristic result. I.e. -5 means any rule application 
 Returns:
 int: The number of iterations, i.e. rule applications
 """
-def random_wire_reduce(g: BaseGraph[VT,ET], boundaries=False, gadgets=False, max_v=None, cap=1):
+def random_wire_reduce(g: BaseGraph[VT,ET], boundaries=False, gadgets=False, max_v=None, cap=1, quiet=True, stats=None):
     changes = True
     iterations = 0
 
@@ -277,7 +277,7 @@ cap (int): Lower bound for heuristic result. I.e. -5 means any rule application 
 Returns:
 int: The number of iterations, i.e. rule applications
 """
-def greedy_wire_reduce(g: BaseGraph[VT,ET], boundaries=False, gadgets=False, max_v=None, cap=1):
+def greedy_wire_reduce(g: BaseGraph[VT,ET], boundaries=False, gadgets=False, max_v=None, cap=1, quiet=True, stats=None):
     changes = True
     iterations = 0
 
