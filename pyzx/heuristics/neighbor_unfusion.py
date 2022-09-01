@@ -7,7 +7,7 @@ from typing import Tuple, List
 from pyzx.utils import VertexType, EdgeType
 from .tools import split_phases, insert_identity
 from pyzx.gflow import gflow
-from .gflow_calculation import update_gflow_from_double_insertion, update_gflow_from_lcomp, update_gflow_from_pivot
+from .gflow_calculation import focus_gflow, update_gflow_from_double_insertion, update_gflow_from_lcomp, update_gflow_from_pivot
 from .simplify import get_random_match
 from pyzx.rules import match_ids_parallel, remove_ids, match_spider_parallel, spider
 import math
@@ -82,7 +82,7 @@ def pivot_matcher(g: BaseGraph[VT,ET], gfl=None) -> List[MatchPivotHeuristicNeig
 
     return m
 
-def get_possible_unfusion_neighbours(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
+def get_possible_unfusion_neighbours_old(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
     possible_unfusion_neighbours = []
     if len(gfl[vertex]) == 1:
         possible_unfusion_neighbours.append(next(iter(gfl[vertex]))) #get first element of set
@@ -95,6 +95,20 @@ def get_possible_unfusion_neighbours(g: BaseGraph[VT,ET], vertex, exclude_vertex
         possible_unfusion_neighbours.remove(exclude_vertex)
     return possible_unfusion_neighbours
 
+def get_possible_unfusion_neighbours(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
+    possible_unfusion_neighbors = []
+    c_set_neighbor = set(g.neighbors(vertex)).intersection(gfl[1][vertex]).pop()
+    possible_unfusion_neighbors.append(c_set_neighbor)
+    # if abs(gfl[0][c_set_neighbor] - gfl[0][vertex]) == 1:
+    #     possible_unfusion_neighbors.append(c_set_neighbor)
+    for neighbor in g.neighbors(vertex):
+        if set(g.neighbors(neighbor)).intersection(gfl[1][neighbor]).pop() == vertex:
+            # if abs(gfl[0][neighbor] - gfl[0][vertex]) == 1:
+            possible_unfusion_neighbors.append(neighbor)
+    if exclude_vertex and exclude_vertex in possible_unfusion_neighbors:
+        # print("removed an exclude vertex ",exclude_vertex)
+        possible_unfusion_neighbors.remove(exclude_vertex)
+    return possible_unfusion_neighbors
 
 def unfuse_to_neighbor(g,vertex,neighbor,desired_phase):
     new_phase = split_phases(g.phases()[vertex], desired_phase)
@@ -105,11 +119,11 @@ def unfuse_to_neighbor(g,vertex,neighbor,desired_phase):
     phaseless_spider = insert_identity(g,vertex,phase_spider)
 
     g.remove_edge(g.edge(vertex,neighbor))
-    # print("unfuse to neighbor ",vertex, neighbor, phaseless_spider, phase_spider)
+    print("unfuse to neighbor ",vertex, neighbor, phaseless_spider, phase_spider)
     return (phaseless_spider, phase_spider)
 
 def apply_lcomp(g: BaseGraph[VT,ET], match, gfl):
-    # print("apply lcomp match ",match)
+    print("apply lcomp match ",match)
     v,neighbors = match[1]
     unfusion_neighbor = match[2]
     neighbor_copy = neighbors[:]
@@ -122,7 +136,7 @@ def apply_lcomp(g: BaseGraph[VT,ET], match, gfl):
 
 
 def apply_pivot(g: BaseGraph[VT,ET], match, gfl):
-    # print("apply pivot match ",match)
+    print("apply pivot match ",match)
     v1,v2 = match[1]
     unfusion_neighbors = {}
     unfusion_neighbors[v1] = match[2]
@@ -132,7 +146,7 @@ def apply_pivot(g: BaseGraph[VT,ET], match, gfl):
             phaseless_s, phase_s = unfuse_to_neighbor(g, vertex, unfusion_neighbors[vertex], Fraction(0,1))
             update_gflow_from_double_insertion(gfl, vertex, unfusion_neighbors[vertex], phaseless_s, phase_s)
             
-    update_gflow_from_pivot(g, v1, v2, gfl)
+    gfl = update_gflow_from_pivot(g, v1, v2, gfl)
     apply_rule(g, pivot, [(v1,v2,[],[])])
 
 def generate_matches(g, gfl,max_v=None, cap=1):
@@ -165,14 +179,17 @@ def generate_matches(g, gfl,max_v=None, cap=1):
 def greedy_wire_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bool=False, stats=None):
     changes = True
     iterations = 0
-    gfl = gflow(g)[1]
+    gfl = gflow(g)
+    gff = focus_gflow(g, gfl)
     while changes:
         changes = False
-        lcomp_matches, pivot_matches = generate_matches(g, gfl=gfl, max_v=max_v, cap=cap)
-        if apply_best_match(g, lcomp_matches, pivot_matches, gfl):
+        lcomp_matches, pivot_matches = generate_matches(g, gfl=gff, max_v=max_v, cap=cap)
+        gf1 = gff[1]
+        if apply_best_match(g, lcomp_matches, pivot_matches, gf1):
             iterations += 1
             changes = True
-            gfl = gflow(g)[1]
+            gff[1] = gf1
+            gff = focus_gflow(g, gff)
         else:
             continue
 

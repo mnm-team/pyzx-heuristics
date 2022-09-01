@@ -113,3 +113,7 @@ def bi_adj(g: BaseGraph[VT,ET], vs:List[VT], ws:List[VT]) -> Mat2:
     """Construct a biadjacency matrix between the supplied list of vertices
     ``vs`` and ``ws``."""
     return Mat2([[1 if g.connected(v,w) else 0 for v in vs] for w in ws])
+
+
+
+

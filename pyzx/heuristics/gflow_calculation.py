@@ -1,5 +1,6 @@
 import copy
 import itertools
+from typing import List, Dict, Set, Tuple
 from pyzx.graph.base import BaseGraph, VT, ET, EdgeType
 from pyzx.graph.graph_s import GraphS
 
@@ -113,3 +114,39 @@ def update_gflow_from_lcomp(g: BaseGraph[VT,ET], u: VT, gf):
   gf.pop(u) #cleanup, i.e. remove lcomp vertex
 
   return gf
+
+def focus_gflow(g: BaseGraph[VT,ET], gf: List[Tuple[Dict[VT,int], Dict[VT,Set[VT]], int]]):
+  l:     Dict[VT,int]      = {}
+  gflow: Dict[VT, Set[VT]] = {}
+  for v in g.outputs():
+    l[v] = 0
+    gflow[v] = set() #usually outputs do not occur in g function but we need this construct as a temporary helper
+  processed = set(g.outputs())
+
+  unprocessed = set(g.vertices()).difference(processed)
+  k = 1
+  while True:
+    candidates = []
+    for v in unprocessed:
+      odd_n = set(get_odd_neighbourhood(g,gf[1][v]))
+      odd_n.discard(v)
+      no_candidate = False
+      for n in odd_n:
+        if not n in gflow:
+          no_candidate = True
+          break
+      if no_candidate:
+        continue
+
+      c_set = set(gf[1][v])
+      for n in odd_n:
+        c_set.symmetric_difference_update(gflow[n])
+      gflow[v] = c_set
+      l[v] = k
+      candidates.append(v)
+    if len(candidates) == 0:
+      for output in g.outputs(): #delete outputs from g function
+        gflow.pop(output)
+      return [l, gflow, k]
+    unprocessed.difference_update(set(candidates))
+    k += 1
