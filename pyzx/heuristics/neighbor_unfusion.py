@@ -7,7 +7,7 @@ from typing import Tuple, List
 from pyzx.utils import VertexType, EdgeType
 from .tools import split_phases, insert_identity
 from pyzx.gflow import gflow
-from .gflow_calculation import focus_gflow, update_gflow_from_double_insertion, update_gflow_from_lcomp, update_gflow_from_pivot
+from .gflow_calculation import check_gflow, focus_gflow, update_gflow_from_double_insertion, update_gflow_from_lcomp, update_gflow_from_pivot
 from .simplify import get_random_match
 from pyzx.rules import match_ids_parallel, remove_ids, match_spider_parallel, spider
 import math
@@ -97,14 +97,27 @@ def get_possible_unfusion_neighbours_old(g: BaseGraph[VT,ET], vertex, exclude_ve
 
 def get_possible_unfusion_neighbours(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
     possible_unfusion_neighbors = []
-    c_set_neighbor = set(g.neighbors(vertex)).intersection(gfl[1][vertex]).pop()
-    possible_unfusion_neighbors.append(c_set_neighbor)
-    # if abs(gfl[0][c_set_neighbor] - gfl[0][vertex]) == 1:
-    #     possible_unfusion_neighbors.append(c_set_neighbor)
+    # c_set_neighbor = set(g.neighbors(vertex)).intersection(gfl[1][vertex]).pop()
+    # if len(set(g.neighbors(vertex)).intersection(gfl[1][vertex])) > 1 :
+    #     print("multiple neighboring vertices in cset ",len(set(g.neighbors(vertex)).intersection(gfl[1][vertex])))
+    if not vertex in gfl[1]:
+        print("fatal")
+        breakpoint()
+    # for c_set_neighbor in set(g.neighbors(vertex)).intersection(gfl[1][vertex]):
+    #     # possible_unfusion_neighbors.append(c_set_neighbor)
+    #     if abs(gfl[0][c_set_neighbor] - gfl[0][vertex]) == 1:
+    #         possible_unfusion_neighbors.append(c_set_neighbor)
+    if len(set(g.neighbors(vertex)).intersection(gfl[1][vertex])) == 1 :
+        c_set_neighbor = set(g.neighbors(vertex)).intersection(gfl[1][vertex]).pop()
+        if abs(gfl[0][c_set_neighbor] - gfl[0][vertex]) == 1:
+            # print("vertex ",vertex," cset neighbor with distance 1: ",c_set_neighbor)
+            possible_unfusion_neighbors.append(c_set_neighbor)
+
     for neighbor in g.neighbors(vertex):
-        if set(g.neighbors(neighbor)).intersection(gfl[1][neighbor]).pop() == vertex:
-            # if abs(gfl[0][neighbor] - gfl[0][vertex]) == 1:
-            possible_unfusion_neighbors.append(neighbor)
+        if neighbor in gfl[1] and vertex in set(g.neighbors(neighbor)).intersection(gfl[1][neighbor]): # no output neighbor
+            if abs(gfl[0][neighbor] - gfl[0][vertex]) == 1 and len(set(g.neighbors(neighbor)).intersection(gfl[1][neighbor])) == 1:
+                # print("vertex ",vertex," previous neighbor with distance 1: ",neighbor)
+                possible_unfusion_neighbors.append(neighbor)
     if exclude_vertex and exclude_vertex in possible_unfusion_neighbors:
         # print("removed an exclude vertex ",exclude_vertex)
         possible_unfusion_neighbors.remove(exclude_vertex)
@@ -189,6 +202,8 @@ def greedy_wire_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bo
             iterations += 1
             changes = True
             gff[1] = gf1
+            if not check_gflow(g,gff):
+                breakpoint()
             gff = focus_gflow(g, gff)
         else:
             continue
@@ -198,14 +213,31 @@ def greedy_wire_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bo
 def random_wire_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bool=False, stats=None):
     changes = True
     iterations = 0
-    gfl = gflow(g)[1]
+    gfl = gflow(g)
+    if not gfl:
+        breakpoint()
+    if not check_gflow(g,gfl):
+        print("before focus")
+        import pdb
+        pdb.set_trace()
+    gff = focus_gflow(g, gfl)
+    if not check_gflow(g,gff):
+        print("before start")
+        import pdb
+        pdb.set_trace()
     while changes:
         changes = False
-        lcomp_matches, pivot_matches = generate_matches(g, gfl=gfl, max_v=max_v, cap=cap)
-        if apply_random_match(g, lcomp_matches, pivot_matches, gfl):
+        lcomp_matches, pivot_matches = generate_matches(g, gfl=gff, max_v=max_v, cap=cap)
+        gf1 = gff[1]
+        if apply_random_match(g, lcomp_matches, pivot_matches, gf1):
             iterations += 1
             changes = True
-            gfl = gflow(g)[1]
+            gff[1] = gf1
+            if not check_gflow(g,gff):
+                print("shouldbreakhere")
+                import pdb
+                pdb.set_trace()
+            gff = focus_gflow(g, gff)
         else:
             continue
 
@@ -277,6 +309,8 @@ def sim_annealing_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, iterations=10
 
 def apply_random_match(g, lcomp_matches, pivot_matches, gfl):
     method, match = get_random_match(lcomp_matches, pivot_matches)
+    if not gfl:
+        breakpoint()
 
     if method == "pivot":
         apply_pivot(g,match, gfl)

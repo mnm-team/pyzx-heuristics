@@ -613,6 +613,9 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
     def set_inputs(self, inputs: Tuple[VT, ...]):
         """Sets the inputs of the graph."""
         raise NotImplementedError("Not implemented on backend " + type(self).backend)
+    
+    def non_outputs(self) -> Set[VT]:
+        return self.vertex_set().difference(set(self.outputs()))
 
     def num_inputs(self) -> int:
         """Gets the number of inputs of the graph."""
