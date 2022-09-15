@@ -7,11 +7,12 @@ from typing import Tuple, List
 from pyzx.utils import VertexType, EdgeType
 from .tools import split_phases, insert_identity
 from pyzx.gflow import gflow
-from .gflow_calculation import check_gflow, focus_gflow, update_gflow_from_double_insertion, update_gflow_from_lcomp, update_gflow_from_pivot
+from .gflow_calculation import build_focused_gflow_graph, check_gflow, focus_gflow, update_gflow_from_double_insertion, update_gflow_from_lcomp, update_gflow_from_pivot
 from .simplify import get_random_match
 from pyzx.rules import match_ids_parallel, remove_ids, match_spider_parallel, spider
 import math
 import random
+import copy #TODO: remove when not testing
 
 
 MatchLcompHeuristicNeighbourType = Tuple[float,Tuple[VT,List[VT],VT]]
@@ -38,8 +39,25 @@ def lcomp_matcher(g: BaseGraph[VT,ET], gfl=None) -> List[MatchLcompHeuristicNeig
         if get_phase_type(g.phase(v)) == 1:
             m.append((lcomp_heuristic(g,v),(v,vn),None))
         else:
-            for neighbor in get_possible_unfusion_neighbours(g, v, None, gfl):
+            for neighbor in get_unfusion_neighbors_fggraph(g, v, None, gfl):
                 m.append((lcomp_heuristic_neighbor_unfusion(g,v,neighbor),(v,vn),neighbor))
+    return m
+
+def lcomp_matcher_all(g: BaseGraph[VT,ET], gfl=None) -> List[MatchLcompHeuristicNeighbourType]:
+    candidates = g.vertex_set()
+    types = g.types()
+
+    m = []
+    while len(candidates) > 0:
+        v = candidates.pop()
+        vt = types[v]
+
+        if vt != VertexType.Z: continue
+                
+        vn = list(g.neighbors(v))
+
+        for neighbor in get_possible_unfusion_neighbours(g, v, None, gfl):
+            m.append((lcomp_heuristic_neighbor_unfusion(g,v,neighbor),(v,vn),neighbor))
     return m
 
 MatchPivotHeuristicNeighbourType = Tuple[float,Tuple[VT,VT],VT,VT]
@@ -69,20 +87,43 @@ def pivot_matcher(g: BaseGraph[VT,ET], gfl=None) -> List[MatchPivotHeuristicNeig
             if get_phase_type(g.phase(v1)) == 2:
                 m.append((pivot_heuristic(g,e),(v0,v1),None,None))
             else:
-                for neighbor in get_possible_unfusion_neighbours(g, v1, v0, gfl):
+                for neighbor in get_unfusion_neighbors_fggraph(g, v1, v0, gfl):
                     m.append((pivot_heuristic_neighbor_unfusion(g,e,None,neighbor),(v0,v1),None,neighbor))
         else:
             if get_phase_type(g.phase(v1)) == 2:
-                for neighbor in get_possible_unfusion_neighbours(g, v0, v1, gfl):
+                for neighbor in get_unfusion_neighbors_fggraph(g, v0, v1, gfl):
                     m.append((pivot_heuristic_neighbor_unfusion(g,e,neighbor,None),(v0,v1),neighbor,None))
             else:
-                for neighbor_v0 in get_possible_unfusion_neighbours(g, v0, v1, gfl):
-                    for neighbor_v1 in get_possible_unfusion_neighbours(g, v1, v0, gfl):
+                for neighbor_v0 in get_unfusion_neighbors_fggraph(g, v0, v1, gfl):
+                    for neighbor_v1 in get_unfusion_neighbors_fggraph(g, v1, v0, gfl):
                         m.append((pivot_heuristic_neighbor_unfusion(g,e,neighbor_v0,neighbor_v1),(v0,v1),neighbor_v0,neighbor_v1))
 
     return m
 
-def get_possible_unfusion_neighbours_old(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
+def get_possible_unfusion_neighbours(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
+    res = []
+    for n in g.neighbors(vertex):
+        if g.types()[n] != VertexType.BOUNDARY:
+            res.append(n)
+    return res
+
+def get_unfusion_neighbors_fggraph(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, fggraph=None):
+    possible_unfusion_neighbors = []
+    # c_set_neighbor = set(g.neighbors(vertex)).intersection(gfl[1][vertex]).pop()
+    # if len(set(g.neighbors(vertex)).intersection(gfl[1][vertex])) > 1 :
+    #     print("multiple neighboring vertices in cset ",len(set(g.neighbors(vertex)).intersection(gfl[1][vertex])))
+    # if not vertex in gfl[1]:
+    #     print("fatal")
+    #     breakpoint()
+    if len(fggraph.neighbors(vertex)) > 2:
+        return possible_unfusion_neighbors
+    for neighbor in fggraph.neighbors(vertex):
+        if not neighbor == exclude_vertex and len(set(g.neighbors(vertex)).intersection(g.neighbors(neighbor))) < 2:
+            possible_unfusion_neighbors.append(neighbor)
+
+    return possible_unfusion_neighbors    
+
+def get_possible_unfusion_neighbours_orig(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
     possible_unfusion_neighbours = []
     if len(gfl[vertex]) == 1:
         possible_unfusion_neighbours.append(next(iter(gfl[vertex]))) #get first element of set
@@ -93,37 +134,60 @@ def get_possible_unfusion_neighbours_old(g: BaseGraph[VT,ET], vertex, exclude_ve
     if exclude_vertex and exclude_vertex in possible_unfusion_neighbours:
         # print("removed an exclude vertex ",exclude_vertex)
         possible_unfusion_neighbours.remove(exclude_vertex)
+    # if len(possible_unfusion_neighbours) > 0:
+        # print("found some neighbors for vertex ",vertex, possible_unfusion_neighbours)
     return possible_unfusion_neighbours
 
-def get_possible_unfusion_neighbours(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
+def get_possible_unfusion_neighbours_new(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
     possible_unfusion_neighbors = []
     # c_set_neighbor = set(g.neighbors(vertex)).intersection(gfl[1][vertex]).pop()
     # if len(set(g.neighbors(vertex)).intersection(gfl[1][vertex])) > 1 :
     #     print("multiple neighboring vertices in cset ",len(set(g.neighbors(vertex)).intersection(gfl[1][vertex])))
-    if not vertex in gfl[1]:
-        print("fatal")
-        breakpoint()
+    # if not vertex in gfl[1]:
+    #     print("fatal")
+    #     breakpoint()
+    if len(gfl.neighbors(vertex)) > 2:
+        return possible_unfusion_neighbors
+    for neighbor in gfl.neighbors(vertex):
+        if len(gfl.neighbors(neighbor)) <= 2 and not neighbor == exclude_vertex:
+            possible_unfusion_neighbors.append(neighbor)
+
+    return possible_unfusion_neighbors
     # for c_set_neighbor in set(g.neighbors(vertex)).intersection(gfl[1][vertex]):
     #     # possible_unfusion_neighbors.append(c_set_neighbor)
     #     if abs(gfl[0][c_set_neighbor] - gfl[0][vertex]) == 1:
     #         possible_unfusion_neighbors.append(c_set_neighbor)
-    if len(set(g.neighbors(vertex)).intersection(gfl[1][vertex])) == 1 :
-        c_set_neighbor = set(g.neighbors(vertex)).intersection(gfl[1][vertex]).pop()
-        if abs(gfl[0][c_set_neighbor] - gfl[0][vertex]) == 1:
-            # print("vertex ",vertex," cset neighbor with distance 1: ",c_set_neighbor)
-            possible_unfusion_neighbors.append(c_set_neighbor)
+    # if len(set(g.neighbors(vertex)).intersection(gfl[1][vertex])) == 1 :
+    #     c_set_neighbor = set(g.neighbors(vertex)).intersection(gfl[1][vertex]).pop()
+    #     if abs(gfl[0][c_set_neighbor] - gfl[0][vertex]) == 1:
+    #         # print("vertex ",vertex," cset neighbor with distance 1: ",c_set_neighbor)
+    #         possible_unfusion_neighbors.append(c_set_neighbor)
 
-    for neighbor in g.neighbors(vertex):
-        if neighbor in gfl[1] and vertex in set(g.neighbors(neighbor)).intersection(gfl[1][neighbor]): # no output neighbor
-            if abs(gfl[0][neighbor] - gfl[0][vertex]) == 1 and len(set(g.neighbors(neighbor)).intersection(gfl[1][neighbor])) == 1:
-                # print("vertex ",vertex," previous neighbor with distance 1: ",neighbor)
-                possible_unfusion_neighbors.append(neighbor)
-    if exclude_vertex and exclude_vertex in possible_unfusion_neighbors:
-        # print("removed an exclude vertex ",exclude_vertex)
-        possible_unfusion_neighbors.remove(exclude_vertex)
-    return possible_unfusion_neighbors
+    # for neighbor in g.neighbors(vertex):
+    #     if neighbor in gfl[1] and vertex in set(g.neighbors(neighbor)).intersection(gfl[1][neighbor]): # no output neighbor
+    #         if abs(gfl[0][neighbor] - gfl[0][vertex]) == 1 and len(set(g.neighbors(neighbor)).intersection(gfl[1][neighbor])) == 1:
+    #             # print("vertex ",vertex," previous neighbor with distance 1: ",neighbor)
+    #             possible_unfusion_neighbors.append(neighbor)
+    # if exclude_vertex and exclude_vertex in possible_unfusion_neighbors:
+    #     # print("removed an exclude vertex ",exclude_vertex)
+    #     possible_unfusion_neighbors.remove(exclude_vertex)
+    # return possible_unfusion_neighbors
+
+def get_possible_unfusion_neighbors_3(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
+    neighbors = set(g.neighbors(vertex)) #set for iteration
+    res_neighbors = set(g.neighbors(vertex)) #resulting set
+    for v in set(g.non_outputs()).difference(neighbors):
+        n_in_cset = gfl[1][v].intersection(neighbors)
+        if len(n_in_cset) > 0 and len(n_in_cset) % 2 == 0:
+            res_neighbors.difference_update(n_in_cset)
+    if exclude_vertex:
+        res_neighbors.difference_update(set(exclude_vertex))
+    return res_neighbors
+
 
 def unfuse_to_neighbor(g,vertex,neighbor,desired_phase):
+    # import pdb
+    # pdb.set_trace()
     new_phase = split_phases(g.phases()[vertex], desired_phase)
     phase_spider = g.add_vertex(VertexType.Z,-2,g.rows()[vertex],new_phase)
     g.set_phase(vertex, desired_phase)
@@ -132,7 +196,8 @@ def unfuse_to_neighbor(g,vertex,neighbor,desired_phase):
     phaseless_spider = insert_identity(g,vertex,phase_spider)
 
     g.remove_edge(g.edge(vertex,neighbor))
-    print("unfuse to neighbor ",vertex, neighbor, phaseless_spider, phase_spider)
+    # print("unfuse to neighbor ",vertex, neighbor, phaseless_spider, phase_spider)
+    # pdb.set_trace()
     return (phaseless_spider, phase_spider)
 
 def apply_lcomp(g: BaseGraph[VT,ET], match, gfl):
@@ -163,8 +228,10 @@ def apply_pivot(g: BaseGraph[VT,ET], match, gfl):
     apply_rule(g, pivot, [(v1,v2,[],[])])
 
 def generate_matches(g, gfl,max_v=None, cap=1):
-    lcomp_matches = lcomp_matcher(g, gfl)
-    pivot_matches = pivot_matcher(g, gfl)
+    fggraph = build_focused_gflow_graph(g, gfl)
+    # fggraph = gflow(g)[1]
+    lcomp_matches = lcomp_matcher(g, fggraph)
+    pivot_matches = pivot_matcher(g, fggraph)
     # spider count > 0, spider count == 0, spider count < 0
     # wire_count > 0, wire_count == 0, wire count < 0
     # wire_count >= cap, wire_count < cap
@@ -202,8 +269,8 @@ def greedy_wire_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bo
             iterations += 1
             changes = True
             gff[1] = gf1
-            if not check_gflow(g,gff):
-                breakpoint()
+            # if not check_gflow(g,gff):
+            #     breakpoint()
             gff = focus_gflow(g, gff)
         else:
             continue
@@ -215,29 +282,38 @@ def random_wire_reduce_neighbor(g: BaseGraph[VT,ET], max_v=None, cap=1, quiet:bo
     iterations = 0
     gfl = gflow(g)
     if not gfl:
-        breakpoint()
-    if not check_gflow(g,gfl):
-        print("before focus")
         import pdb
         pdb.set_trace()
+    # if not check_gflow(g,gfl):
+    #     print("before focus")
+    #     import pdb
+    #     pdb.set_trace()
     gff = focus_gflow(g, gfl)
-    if not check_gflow(g,gff):
-        print("before start")
-        import pdb
-        pdb.set_trace()
+    # if not check_gflow(g,gff):
+    #     print("before start")
+    #     import pdb
+    #     pdb.set_trace()
     while changes:
         changes = False
         lcomp_matches, pivot_matches = generate_matches(g, gfl=gff, max_v=max_v, cap=cap)
         gf1 = gff[1]
+        old_gf = gfl
+        old_g = copy.deepcopy(g)
+        old_gff = copy.deepcopy(gff)
         if apply_random_match(g, lcomp_matches, pivot_matches, gf1):
             iterations += 1
             changes = True
             gff[1] = gf1
-            if not check_gflow(g,gff):
-                print("shouldbreakhere")
+            # if not check_gflow(g,gff):
+            #     print("shouldbreakhere")
+            #     import pdb
+            #     pdb.set_trace()
+            gfl = gflow(g)
+            if not gfl:
                 import pdb
                 pdb.set_trace()
-            gff = focus_gflow(g, gff)
+
+            gff = focus_gflow(g, gfl)
         else:
             continue
 

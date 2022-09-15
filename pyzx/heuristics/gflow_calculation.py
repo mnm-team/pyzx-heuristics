@@ -131,7 +131,8 @@ def focus_gflow(g: BaseGraph[VT,ET], gf: List[Tuple[Dict[VT,int], Dict[VT,Set[VT
       try:
         odd_n = set(get_odd_neighbourhood(g,gf[1][v]))
       except:
-        breakpoint()
+        import pdb
+        pdb.set_trace()
       odd_n.discard(v)
       no_candidate = False
       for n in odd_n:
@@ -154,7 +155,7 @@ def focus_gflow(g: BaseGraph[VT,ET], gf: List[Tuple[Dict[VT,int], Dict[VT,Set[VT
           breakpoint()
       for output in g.outputs(): #delete outputs from g function
         gflow.pop(output)
-      return [l, gflow, k]
+      return [gf[0], gflow, gf[2]] #[l, gflow, k]
     unprocessed.difference_update(set(candidates))
     k += 1
 
@@ -236,6 +237,16 @@ def build_line(g, vertex, gflow):
     # if b:
     #   return res
 
+'''builds focused gflow graph where vertices are connected iff
+ they are connected in the original graph and appear in one of each correction sets'''
+def build_focused_gflow_graph(g, gff):
+  data = []
+  for out in g.outputs():
+    line = build_line_rec(g,out, gff)
+    data.append(line)
+  return build_diagram_from_lines(g, data)
+
+
 '''
 Builds focused gflow graph as lists
 '''
@@ -247,7 +258,7 @@ def build_line_rec(g, vertex, gflow):
   if not nlist:
     return [vertex]
   if len(nlist) > 1:
-    print("branching on vertex ",vertex)
+    # print("branching on vertex ",vertex)
     res = []
     for n in nlist:
       res.append(build_line_rec(g, n, gflow))
@@ -265,6 +276,9 @@ def build_diagram_from_lines(g, data):
     recursive_diagram_build(graph, data[node][1:], data[node][0])
   graph.set_inputs(g.inputs())
   graph.set_outputs(g.outputs())
+  for v in graph.vertices():
+    graph.set_qubit(v, g.qubit(v))
+    graph.set_row(v, g.row(v))
   return graph
 
 '''

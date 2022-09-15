@@ -145,7 +145,7 @@ def lcomp_heuristic_neighbor_unfusion(g: BaseGraph[VT,ET], vertex, neighbor, deb
     res = akk - gauss_sum
     if debug:
         print("akk ",akk,"max_sum ",res)
-    return res + len(vn_set) - 2
+    return res + len(vn_set) - 1 #TODO: Maybe -2 check out
 
 """
 Calculates heuristic for neighbor unfusion + pivoting
