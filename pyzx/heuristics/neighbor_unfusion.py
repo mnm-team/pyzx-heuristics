@@ -123,6 +123,42 @@ def get_unfusion_neighbors_fggraph(g: BaseGraph[VT,ET], vertex, exclude_vertex=N
 
     return possible_unfusion_neighbors    
 
+def get_connected_neighbors(g, v1, v2):
+    v1n = set(g.neighbors(v1))
+    v1n.discard(v2)
+    v2n = set(g.neighbors(v2))
+    v2n.discard(v1)
+    res = []
+    for n in v1n:
+        for n2 in g.neighbors(n):
+            if n2 in v2n:
+                res.append((n,n2))
+    return res
+
+def traverse_fggraph(fggraph, start, goal):
+    neighbors = list(fggraph.neighbors(start))
+    if len(neighbors) != 2:
+        return False
+    
+    # current = neighbors[0] if direction == 'l' else neighbors[1]
+    for current in neighbors:
+        previous = start
+        while True:
+            if current == goal:
+                return True
+            neighbors = fggraph.neighbors(current)
+            # print("get neighbors ",neighbors," of current ",current, "previous is ",previous)
+            if len(neighbors) != 2:
+                break
+            for neighbor in neighbors:
+                if neighbor != previous:
+                    previous = current
+                    current = neighbor
+                    # print("set current ",current)
+                    break
+    return False
+        
+
 def get_possible_unfusion_neighbours_orig(g: BaseGraph[VT,ET], vertex, exclude_vertex=None, gfl=None):
     possible_unfusion_neighbours = []
     if len(gfl[vertex]) == 1:

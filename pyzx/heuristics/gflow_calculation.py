@@ -1,6 +1,7 @@
 import copy
 import itertools
 from typing import List, Dict, Set, Tuple
+from pyzx.gflow import gflow
 from pyzx.graph.base import BaseGraph, VT, ET, EdgeType
 from pyzx.graph.graph_s import GraphS
 
@@ -117,10 +118,10 @@ def update_gflow_from_lcomp(g: BaseGraph[VT,ET], u: VT, gf):
 
 def focus_gflow(g: BaseGraph[VT,ET], gf: List[Tuple[Dict[VT,int], Dict[VT,Set[VT]], int]]):
   l:     Dict[VT,int]      = {}
-  gflow: Dict[VT, Set[VT]] = {}
+  cset: Dict[VT, Set[VT]] = {}
   for v in g.outputs():
     l[v] = 0
-    gflow[v] = set() #usually outputs do not occur in g function but we need this construct as a temporary helper
+    cset[v] = set() #usually outputs do not occur in g function but we need this construct as a temporary helper
   processed = set(g.outputs())
 
   unprocessed = set(g.vertices()).difference(processed)
@@ -136,7 +137,7 @@ def focus_gflow(g: BaseGraph[VT,ET], gf: List[Tuple[Dict[VT,int], Dict[VT,Set[VT
       odd_n.discard(v)
       no_candidate = False
       for n in odd_n:
-        if not n in gflow:
+        if not n in cset:
           no_candidate = True
           break
       if no_candidate:
@@ -144,18 +145,22 @@ def focus_gflow(g: BaseGraph[VT,ET], gf: List[Tuple[Dict[VT,int], Dict[VT,Set[VT
 
       c_set = set(gf[1][v])
       for n in odd_n:
-        c_set.symmetric_difference_update(gflow[n])
-      gflow[v] = c_set
+        c_set.symmetric_difference_update(cset[n])
+      cset[v] = c_set
       l[v] = k
       candidates.append(v)
     if len(candidates) == 0:
+      recalculate_flag = False
       for v in g.vertices():
-        if not v in gflow:
+        if not v in cset:
+          recalculate_flag = True
           print("fatal: vertex ",v," not in focused gflow ")
-          breakpoint()
+          # breakpoint()
+      if recalculate_flag:
+        return focus_gflow(g, gflow(g))
       for output in g.outputs(): #delete outputs from g function
-        gflow.pop(output)
-      return [gf[0], gflow, gf[2]] #[l, gflow, k]
+        cset.pop(output)
+      return [gf[0], cset, gf[2]] #[l, gflow, k]
     unprocessed.difference_update(set(candidates))
     k += 1
 

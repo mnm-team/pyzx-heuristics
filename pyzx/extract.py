@@ -476,6 +476,7 @@ def apply_cnots(g: BaseGraph[VT, ET], c: Circuit, frontier: List[VT], qubit_map:
         qubit_map[w] = qubit_map[v]
         b = [o for o in g.neighbors(v) if o in outputs][0]
         g.remove_vertex(v)
+        # print("remove vertex inapplycnots ",v)
         g.add_edge(g.edge(w, b))
         frontier.remove(v)
         frontier.append(w)
@@ -504,6 +505,7 @@ def clean_frontier(g: BaseGraph[VT, ET], c: Circuit, frontier: List[VT],
             g.set_edge_type(e, 1)
         if phases[v]:
             c.add_gate("ZPhase", q, phases[v])
+            # print("extract vertex ",v," as zphase gate on qubit ",q)
             g.set_phase(v, 0)
     # And now on to CZ gates
     cz_mat = Mat2([[0 for i in range(g.qubit_count())] for j in range(g.qubit_count())])
@@ -552,6 +554,7 @@ def neighbors_of_frontier(g: BaseGraph[VT, ET], frontier: List[VT]) -> Set[VT]:
         d = [w for w in g.neighbors(v) if w not in outputs]
         if any(w in inputs for w in d):  # frontier vertex v is connected to an input
             if len(d) == 1:  # Only connected to input, remove from frontier
+                # print("remove vertex ",v)
                 frontier.remove(v)
                 continue
             # We disconnect v from the input b via a new spider
