@@ -1,6 +1,6 @@
 from fractions import Fraction
 from pyzx.rules import apply_rule, lcomp, pivot
-from .heuristics import get_phase_type, lcomp_heuristic, pivot_heuristic, lcomp_heuristic_boundary, pivot_heuristic_boundary
+from .heuristics import PhaseType, get_phase_type, lcomp_heuristic, pivot_heuristic, lcomp_heuristic_boundary, pivot_heuristic_boundary
 from pyzx.graph.base import BaseGraph, VT, ET
 from typing import Tuple, List
 from pyzx.utils import VertexType, EdgeType
@@ -10,387 +10,437 @@ import random
 
 MatchLcompHeuristicType = Tuple[float,Tuple[VT,List[VT]],int]
 
-"""
-Generates all matches for local complementation in a graph-like ZX-diagram
+def lcomp_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False) -> List[MatchLcompHeuristicType]:
+    """
+    Generates all matches for local complementation in a graph-like ZX-diagram
 
-Parameters: 
-g (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-boundaries (bool): whether to include boundary spiders
-gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ spiders by the rule application)
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    include_boundaries (bool): whether to include boundary spiders
+    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ spiders by the rule application)
 
-Returns:
-List[MatchLcompHeuristicType]: A list of match tuples (x,y,z), where x is the LCH, y the tuple needed for rule application and z the amount of saved/added spiders
-"""
-def lcomp_matcher(g: BaseGraph[VT,ET], boundaries=False, gadgets=False) -> List[MatchLcompHeuristicType]:
-    candidates = g.vertex_set()
-    types = g.types()
+    Returns:
+    List[MatchLcompHeuristicType]: A list of match tuples (heuristic,vertices,spider_count), where heuristic is the LCH, vertices the tuple needed for rule application and spider_count the amount of saved/added spiders
+    """
+    vertex_candidates = graph.vertex_set()
+    vertex_types = graph.types()
 
-    m = []
-    while len(candidates) > 0:
-        v = candidates.pop()
-        vt = types[v]
-        va = g.phase(v)
+    matches = []
+    while len(vertex_candidates) > 0:
+        current_vertex = vertex_candidates.pop()
+        current_vertex_type = vertex_types[current_vertex]
+        current_vertex_phase = graph.phase(current_vertex)
         
-        if vt != VertexType.Z: continue
-        gadgetize = get_phase_type(va) != 1
-        if gadgets == False and gadgetize: continue # no gadgets if not specified
-        if len(g.neighbors(v)) == 1: continue # no phase gadget top
+        if current_vertex_type != VertexType.Z: continue
+        # Check if the vertex needs to be transformed into an XZ spider
+        needs_gadget = get_phase_type(current_vertex_phase) != PhaseType.TRUE_CLIFFORD
+        # Skip if gadgets are not allowed and the vertex needs to be gadgetized
+        if include_gadgets == False and needs_gadget: continue
+        # Skip if the vertex has only one neighbor (i.e., it's a leaf node)
+        if len(graph.neighbors(current_vertex)) == 1: continue
                 
-        vn = list(g.neighbors(v))
+        current_vertex_neighbors = list(graph.neighbors(current_vertex))
         is_already_gadget = False
         boundary_count = 0
-        for neighbor in vn:
-            if len(g.neighbors(neighbor)) == 1 and get_phase_type(va) != 1: # no phase gadget root
+        for neighbor in current_vertex_neighbors:
+            # Check if the neighbor is a leaf node and the vertex needs to be gadgetized
+            if len(graph.neighbors(neighbor)) == 1 and get_phase_type(current_vertex_phase) != PhaseType.TRUE_CLIFFORD:
                 is_already_gadget = True
-            if types[neighbor] != VertexType.Z: # count boundary neigbors
+            if vertex_types[neighbor] != VertexType.Z:
                 boundary_count += 1
 
-        if is_already_gadget and gadgetize: continue
-        if not boundaries and boundary_count > 0: continue
+        if is_already_gadget and needs_gadget: continue
+        if not include_boundaries and boundary_count > 0: continue
 
-        spider_count = -1 + boundary_count + (2 if gadgetize else 0)
+        spider_count = -1 + boundary_count + (2 if needs_gadget else 0)
 
+        # Calculate the heuristic and add the match to the list
         if boundary_count > 0:
-            m.append((lcomp_heuristic(g,v)-boundary_count,(v,vn),spider_count))
+            matches.append((lcomp_heuristic(graph,current_vertex)-boundary_count,(current_vertex,current_vertex_neighbors),spider_count))
         else:
-            m.append((lcomp_heuristic(g,v),(v,vn),spider_count))
+            matches.append((lcomp_heuristic(graph,current_vertex),(current_vertex,current_vertex_neighbors),spider_count))
         
-    return m
+    return matches
 
 MatchPivotHeuristicType = Tuple[float,Tuple[VT,VT]]
 
-"""
-Generates all matches for pivoting in a graph-like ZX-diagram
+def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False) -> List[MatchPivotHeuristicType]:
+    """
+    Generates all matches for pivoting in a graph-like ZX-diagram
 
-Parameters: 
-g (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-boundaries (bool): whether to include boundary spiders
-gadgets (bool): whether to include non-Clifford spiders (which are transformed into YZ spiders by the rule application)
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    include_boundaries (bool): whether to include boundary spiders
+    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into YZ spiders by the rule application)
 
-Returns:
-List[MatchPivotHeuristicType]: A list of match tuples (x,y,z), where x is the PH, y the tuple needed for rule application and z the amount of saved/added spiders
-"""
-def pivot_matcher(g: BaseGraph[VT,ET], boundaries=False, gadgets=False) -> List[MatchPivotHeuristicType]:
-    candidates = g.edge_set()
-    types = g.types()
-    m = []
-    while len(candidates) > 0:
-        e = candidates.pop()
-        if g.edge_type(e) != EdgeType.HADAMARD: continue
-        v0, v1 = g.edge_st(e)
-        if not (types[v0] == VertexType.Z and types[v1] == VertexType.Z): continue
-        gadgetize_v0 = get_phase_type(g.phase(v0)) != 2
-        gadgetize_v1 = get_phase_type(g.phase(v1)) != 2
-        if gadgets == False and (gadgetize_v0 or gadgetize_v1): continue # no phase gadget generation if not wanted
-        if get_phase_type(g.phase(v0)) != 2 and get_phase_type(g.phase(v1)) != 2: continue # not both phase gadgets
-        if len(g.neighbors(v0)) == 1 or len(g.neighbors(v1)) == 1: continue # no phase gadget top
-        
-        v0_is_already_gadget = False
-        v1_is_already_gadget = False
+    Returns:
+    List[MatchPivotHeuristicType]: A list of match tuples (x,y,z), where x is the PH, y the tuple needed for rule application and z the amount of saved/added spiders
+    """
+    edge_candidates = graph.edge_set()
+    vertex_types = graph.types()
+    matches = []
+
+    while len(edge_candidates) > 0:
+        edge = edge_candidates.pop()
+        if graph.edge_type(edge) != EdgeType.HADAMARD: continue
+
+        # Get the vertices at the ends of this edge
+        vertex0, vertex1 = graph.edge_st(edge)
+
+        # Skip this edge if both vertices are not Z vertices
+        if not (vertex_types[vertex0] == VertexType.Z and vertex_types[vertex1] == VertexType.Z): continue
+
+        is_vertex0_gadget = get_phase_type(graph.phase(vertex0)) != PhaseType.CLIFFORD
+        is_vertex1_gadget = get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD
+
+        if include_gadgets == False and (is_vertex0_gadget or is_vertex1_gadget): continue 
+        if get_phase_type(graph.phase(vertex0)) != 2 and get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD: continue 
+        # Skip this edge if either vertex has only one neighbor (i.e., it's a top of a phase gadget)
+        if len(graph.neighbors(vertex0)) == 1 or len(graph.neighbors(vertex1)) == 1: continue 
+
+        vertex0_already_gadget = False
+        vertex1_already_gadget = False
         boundary_count = 0
-        for neighbor in g.neighbors(v0):
-            if types[neighbor] != VertexType.Z: #no boundaries
+
+        for neighbor in graph.neighbors(vertex0):
+            if vertex_types[neighbor] != VertexType.Z: 
                 boundary_count += 1
 
-            if len(g.neighbors(neighbor)) == 1 and get_phase_type(g.phases()[v0]) != 2: #no second phase gadget on root
-                v0_is_already_gadget = True
+            # Set the flag if the neighbor is a root of a second phase gadget
+            if len(graph.neighbors(neighbor)) == 1 and get_phase_type(graph.phases()[vertex0]) != PhaseType.CLIFFORD: 
+                vertex0_already_gadget = True
 
-        for neighbor in g.neighbors(v1):
-            if types[neighbor] != VertexType.Z: #no boundaries
+        for neighbor in graph.neighbors(vertex1):
+            if vertex_types[neighbor] != VertexType.Z: 
                 boundary_count += 1
 
-            if len(g.neighbors(neighbor)) == 1 and get_phase_type(g.phases()[v1]) != 2: #no second phase gadget on root
-                v1_is_already_gadget = True
+            # Set the flag if the neighbor is a root of a second phase gadget
+            if len(graph.neighbors(neighbor)) == 1 and get_phase_type(graph.phases()[vertex1]) != PhaseType.CLIFFORD: 
+                vertex1_already_gadget = True
 
-        if (v0_is_already_gadget and gadgetize_v0) or (v1_is_already_gadget and gadgetize_v1): continue
-        if not boundaries and boundary_count > 0: continue
+        if (vertex0_already_gadget and is_vertex0_gadget) or (vertex1_already_gadget and is_vertex1_gadget): continue
+        if not include_boundaries and boundary_count > 0: continue
 
-        spider_count = -2 + boundary_count + (2 if gadgetize_v0 else 0) + (2 if gadgetize_v1 else 0)
+        spider_count = -2 + boundary_count + (2 if is_vertex0_gadget else 0) + (2 if is_vertex1_gadget else 0)
 
-        if boundaries:
-            m.append((pivot_heuristic(g,e)-boundary_count,(v0,v1), spider_count))
+        if include_boundaries:
+            matches.append((pivot_heuristic(graph,edge)-boundary_count,(vertex0,vertex1), spider_count))
         else:
-            m.append((pivot_heuristic(g,e),(v0,v1), spider_count))
+            matches.append((pivot_heuristic(graph,edge),(vertex0,vertex1), spider_count))
 
-    return m
+    return matches
 
-"""
-Applies rule with the best heuristic result, i.e. the rule which eliminates the most Hadamard wires
 
-Parameters: 
-g (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-lcomp_matches (List[MatchLcompHeuristicType]): A list of matches for local complementation
-pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
+def apply_best_match(graph, local_complement_matches, pivot_matches):
+    """
+    Applies the rule with the best heuristic result, i.e., the rule which eliminates the most Hadamard wires
 
-Returns:
-bool: True if some rule has been applied, False if both match lists are empty
-"""
-def apply_best_match(g, lcomp_matches, pivot_matches):
-    lcomp_matches.sort(key= lambda m: m[0],reverse=True)
-    pivot_matches.sort(key= lambda m: m[0],reverse=True)
-    method = "pivot"
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e., ZX-diagram
+    local_complement_matches (List[MatchLcompHeuristicType]): A list of matches for local complementation
+    pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
 
-    if len(lcomp_matches) > 0:
-        if len(pivot_matches) > 0:
-            if lcomp_matches[0][0] > pivot_matches[0][0]:
-                method = "lcomp"      
+    Returns:
+    bool: True if some rule has been applied, False if both match lists are empty
+    """
+    # Sort the matches in descending order based on the heuristic result
+    local_complement_matches.sort(key=lambda match: match[0], reverse=True)
+    pivot_matches.sort(key=lambda match: match[0], reverse=True)
+
+    method_to_apply = "pivot"
+
+    # If there are local complement matches
+    if len(local_complement_matches) > 0:
+        # If there are also pivot matches and the best local complement match is better than the best pivot match
+        if len(pivot_matches) > 0 and local_complement_matches[0][0] > pivot_matches[0][0]:
+            method_to_apply = "lcomp"
         else:
-            method = "lcomp"
+            # If there are no pivot matches, set the method to be used as "lcomp"
+            method_to_apply = "lcomp"
     else:
         if len(pivot_matches) == 0:
             return False
 
-    if method == "pivot":
-        apply_pivot(g,pivot_matches[0][1])
+    if method_to_apply == "pivot":
+        apply_pivot(graph, pivot_matches[0][1])
     else:
-        apply_lcomp(g,lcomp_matches[0][1])
+        apply_lcomp(graph, local_complement_matches[0][1])
+
     return True
 
-"""
-Collects and filters all matches for local complementation and pivoting
 
-Parameters: 
-g (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-boundaries (bool): whether to include boundary spiders
-gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
-max_v (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of cap<0).
-cap (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+def generate_filtered_matches(graph, include_boundaries=False, include_gadgets=False, max_vertex_index=None, heuristic_threshold=1):
+    """
+    Collects and filters all matches for local complementation and pivoting
 
-Returns: 
-Tuple (List[MatchLcompHeuristicType], List[MatchPivotHeuristicType]): A tuple with all filtered matches for local complementation and pivoting
-"""
-def generate_matches(g, boundaries=False, gadgets=False, max_v=None, cap=1):
-    lcomp_matches = lcomp_matcher(g, boundaries=boundaries, gadgets=gadgets)
-    pivot_matches = pivot_matcher(g, boundaries=boundaries, gadgets=gadgets)
-    # spider count > 0, spider count == 0, spider count < 0
-    # wire_count > 0, wire_count == 0, wire count < 0
-    # wire_count >= cap, wire_count < cap
-    # match <= max_v, match > max_v
-    filtered_lcomp_matches = []
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    include_boundaries (bool): whether to include boundary spiders
+    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
+    max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
+    heuristic_threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+
+    Returns: 
+    Tuple (List[MatchLcompHeuristicType], List[MatchPivotHeuristicType]): A tuple with all filtered matches for local complementation and pivoting
+    """
+    local_complement_matches = lcomp_matcher(graph, boundaries=include_boundaries, gadgets=include_gadgets)
+    pivot_matches = pivot_matcher(graph, boundaries=include_boundaries, gadgets=include_gadgets)
+
+    filtered_local_complement_matches = []
     filtered_pivot_matches = []
-    for match in lcomp_matches:
-        wire_reduce, vertices, spider_count = match
-        if wire_reduce < cap:
+
+    for match in local_complement_matches:
+        wire_reduction, vertices, spider_count = match
+        # Skip matches that do not meet the heuristic threshold
+        if wire_reduction < heuristic_threshold:
             continue
-        if max_v and wire_reduce <= 0 and vertices[0] > max_v: # prevent non-termination
+        # Skip matches that could cause non-termination
+        if max_vertex_index and wire_reduction <= 0 and vertices[0] > max_vertex_index:
             continue
-        filtered_lcomp_matches.append((wire_reduce, vertices, spider_count))
+        filtered_local_complement_matches.append((wire_reduction, vertices, spider_count))
     
     for match in pivot_matches:
-        wire_reduce, vertices, spider_count = match
-        if wire_reduce < cap:
+        wire_reduction, vertices, spider_count = match
+        # Skip matches that do not meet the heuristic threshold
+        if wire_reduction < heuristic_threshold:
             continue
-        if max_v and wire_reduce <= 0 and vertices[0] > max_v and vertices[1] > max_v: #prevent non-termination
+        # Skip matches that could cause non-termination
+        if max_vertex_index and wire_reduction <= 0 and vertices[0] > max_vertex_index and vertices[1] > max_vertex_index:
             continue
-        filtered_pivot_matches.append((wire_reduce, vertices, spider_count))
+        filtered_pivot_matches.append((wire_reduction, vertices, spider_count))
 
-    return (filtered_lcomp_matches, filtered_pivot_matches)
+    return (filtered_local_complement_matches, filtered_pivot_matches)
 
-"""
-Randomly selects a rule application out of the given matches
 
-Parameters: 
-lcomp_matches (List[MatchLcompHeuristicType]): A list of matches for local complementation
-pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
+def get_random_match(local_complement_matches, pivot_matches):
+    """
+    Randomly selects a rule application out of the given matches
 
-Returns:
-Tuple (string, MatchLcompHeuristicType | MatchPivotHeuristicType): Tuple of rule name and match
-"""
-def get_random_match(lcomp_matches, pivot_matches):
-    method = "pivot"
-    if len(lcomp_matches) > 0 and random.randint(0, 1) == 1:
-        method = "lcomp"
-    
+    Parameters: 
+    local_complement_matches (List[MatchLcompHeuristicType]): A list of matches for local complementation
+    pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
 
-    if len(lcomp_matches) > 0:
-        if len(pivot_matches) > 0:
-            if random.randint(0, 1) == 1:
-                method = "lcomp"      
+    Returns:
+    Tuple (string, MatchLcompHeuristicType | MatchPivotHeuristicType): Tuple of rule name and match
+    """
+    rule_to_apply = "pivot"
+
+    # If there are local complement matches and a 50%/50% percent chance is true
+    if len(local_complement_matches) > 0 and random.randint(0, 1) == 1:
+        rule_to_apply = "lcomp"
+
+    if len(local_complement_matches) > 0:
+        # If there are pivot matches and a 50%/50% percent chance is true
+        if len(pivot_matches) > 0 and random.randint(0, 1) == 1:
+            rule_to_apply = "lcomp"
         else:
-            method = "lcomp"
+            rule_to_apply = "lcomp"
     else:
         if len(pivot_matches) == 0:
-            return ("none",None)
-    if method == "pivot":
-        return ("pivot", pivot_matches[random.randint(0, len(pivot_matches)-1)])
+            return ("none", None)
+
+    if rule_to_apply == "pivot":
+        return ("pivot", pivot_matches[random.randint(0, len(pivot_matches) - 1)])
     else:
-        return ("lcomp", lcomp_matches[random.randint(0, len(lcomp_matches)-1)])
+        return ("lcomp", local_complement_matches[random.randint(0, len(local_complement_matches) - 1)])
 
-"""
-Applies random rule application on diagram
 
-Parameters: 
-g (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-lcomp_matches (List[MatchLcompHeuristicType]): A list of matches for local complementation
-pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
+def apply_random_match(graph, local_complement_matches, pivot_matches):
+    """
+    Applies a randomly selected rule on the given graph.
 
-Returns:
-bool: True if some rule has been applied, False if both match lists are empty
-"""
-def apply_random_match(g, lcomp_matches, pivot_matches):
-    method, match = get_random_match(lcomp_matches, pivot_matches)
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e., ZX-diagram
+    local_complement_matches (List[MatchLcompHeuristicType]): A list of matches for local complementation
+    pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
 
-    if method == "pivot":
-        apply_pivot(g,match[1])
-    elif method == "lcomp":
-        apply_lcomp(g,match[1])
+    Returns:
+    bool: True if a rule has been applied, False if both match lists are empty
+    """
+    rule_type, selected_match = get_random_match(local_complement_matches, pivot_matches)
+
+    if rule_type == "pivot":
+        apply_pivot(graph, selected_match[1])
+    elif rule_type == "lcomp":
+        apply_lcomp(graph, selected_match[1])
     else:
         return False
+
     return True
 
-"""
-Random Hadamard wire reduction
 
-Parameters: 
-g (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-boundaries (bool): whether to include boundary spiders
-gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
-max_v (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of cap<0).
-cap (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+def random_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, heuristic_threshold=1, quiet=True, stats=None):
+    """
+    Random Hadamard wire reduction
 
-Returns:
-int: The number of iterations, i.e. rule applications
-"""
-def random_wire_reduce(g: BaseGraph[VT,ET], boundaries=False, gadgets=False, max_v=None, cap=1, quiet=True, stats=None):
-    changes = True
-    iterations = 0
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    include_boundaries (bool): whether to include boundary spiders
+    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
+    max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
+    heuristic_threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
 
-    while changes:
-        changes = False
-        lcomp_matches, pivot_matches = generate_matches(g, boundaries=boundaries, gadgets=gadgets, max_v=max_v, cap=cap)
-        if apply_random_match(g, lcomp_matches, pivot_matches):
-            iterations += 1
-            changes = True
+    Returns:
+    int: The number of iterations, i.e. rule applications
+    """
+    has_changes_occurred = True
+    rule_application_count = 0
 
-    return iterations
+    while has_changes_occurred:
+        has_changes_occurred = False
+        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, heuristic_threshold=heuristic_threshold)
+        if apply_random_match(graph, local_complement_matches, pivot_matches):
+            rule_application_count += 1
+            has_changes_occurred = True
 
-"""
-Greedy Hadamard wire reduction
+    return rule_application_count
 
-Parameters: 
-g (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-boundaries (bool): whether to include boundary spiders
-gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
-max_v (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of cap<0).
-cap (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
 
-Returns:
-int: The number of iterations, i.e. rule applications
-"""
-def greedy_wire_reduce(g: BaseGraph[VT,ET], boundaries=False, gadgets=False, max_v=None, cap=1, quiet=True, stats=None):
-    changes = True
-    iterations = 0
+def greedy_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, heuristic_threshold=1, quiet=True, stats=None):
+    """
+    Greedy Hadamard wire reduction
 
-    while changes:
-        changes = False
-        lcomp_matches, pivot_matches = generate_matches(g, boundaries=boundaries, gadgets=gadgets, max_v=max_v, cap=cap)
-        if apply_best_match(g, lcomp_matches, pivot_matches):
-            iterations += 1
-            changes = True
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    include_boundaries (bool): whether to include boundary spiders
+    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
+    max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
+    heuristic_threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
 
-    return iterations
+    Returns:
+    int: The number of iterations, i.e. rule applications
+    """
+    has_changes_occurred = True
+    rule_application_count = 0
 
-"""
-Hadamard wire reduction with simulated annealing (does not work very well yet)
+    while has_changes_occurred:
+        has_changes_occurred = False
+        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, heuristic_threshold=heuristic_threshold)
 
-Parameters: 
-g (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-iterations (int): Initial temperature
-alpha (float): Cooling factor
-cap (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+        if apply_best_match(graph, local_complement_matches, pivot_matches):
+            rule_application_count += 1
+            has_changes_occurred = True
 
-Returns:
-int: 0
-"""
-def simulated_annealing_reduce(g: BaseGraph[VT,ET], iterations=100, alpha=0.95, cap=-100000):
-    temperature = iterations
-    epsilon = 0.01
-    it = 0
-    while temperature > epsilon:
-        it += 1
-        lcomp_matches, pivot_matches = generate_matches(g, boundaries=True, gadgets=True, cap=cap)
-        method, match = get_random_match(lcomp_matches, pivot_matches)
-        if method == "none":
+    return rule_application_count
+
+
+def simulated_annealing_reduce(graph: BaseGraph[VT,ET], initial_temperature=100, cooling_factor=0.95, heuristic_threshold=-100000):
+    """
+    Hadamard wire reduction with simulated annealing (does not work very well yet)
+
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    initial_temperature (int): Initial temperature for the simulated annealing process
+    cooling_factor (float): Factor by which the temperature is reduced in each iteration
+    heuristic_threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+
+    Returns:
+    int: 0
+    """
+    temperature = initial_temperature
+    minimum_temperature = 0.01
+    iteration_count = 0
+
+    while temperature > minimum_temperature:
+        iteration_count += 1
+        local_complement_matches, pivot_matches = generate_filtered_matches(graph, boundaries=True, gadgets=True, cap=heuristic_threshold)
+
+        rule_type, selected_match = get_random_match(local_complement_matches, pivot_matches)
+        if rule_type == "none":
             temperature = 0
             break
-        if match[0] < 0:
-            if math.exp(match[0]/temperature) < random.random():
-                temperature *=alpha
-                continue
-        if method == "pivot":
-            apply_pivot(g,match[1])
-        else:
-            apply_lcomp(g,match[1])
 
-        temperature *=alpha
+        if selected_match[0] < 0:
+            # If the probability of accepting the match is less than a random probability
+            if math.exp(selected_match[0]/temperature) < random.random():
+                temperature *= cooling_factor
+                continue
+
+        if rule_type == "pivot":
+            apply_pivot(graph, selected_match[1])
+        else:
+            apply_lcomp(graph, selected_match[1])
+
+        temperature *= cooling_factor
 
     return 0
 
-"""
-Applies local complementation on vertex dependent on phase and whether vertex is boundary or not
 
-- If vertex is boundary an additional spider and (Hadamard) wire is inserted to make the vertex interior
-- If vertex v0 has non-Clifford phase p, two additional vertices v1 and v2 are inserted on top:
-  v0 has phase π/2, v1 has phase 0 and is connected to v0, v2 has phase p - π/2 and is connected to v1
-  Local complementation removes v0, so v1 becomes a XZ spider with v2 corresponding to the measurement effect.
+def apply_lcomp(graph: BaseGraph[VT,ET], match):
+    """
+    Applies local complementation on a vertex depending on its phase and whether it is a boundary vertex or not.
 
-Parameters: 
-g (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-match (V,List[V]): Tuple of vertex and its neighbors
+    - If the vertex is a boundary, an additional spider and (Hadamard) wire is inserted to make the vertex interior.
+    - If the vertex v0 has a non-Clifford phase p, two additional vertices v1 and v2 are inserted on top:
+      v0 has phase π/2, v1 has phase 0 and is connected to v0, v2 has phase p - π/2 and is connected to v1.
+      Local complementation removes v0, so v1 becomes a XZ spider with v2 corresponding to the measurement effect.
 
-Returns: 
-Nothing
-"""
-def apply_lcomp(g: BaseGraph[VT,ET], match):
-    v,neighbors = match
-    neighbor_copy = neighbors[:]
-    identity_insert = True
-    while identity_insert:
-        identity_insert = False
-        for neighbor in g.neighbors(v):
-            if g.types()[neighbor] == VertexType.BOUNDARY:
-                new_v = insert_identity(g,v,neighbor)
-                neighbor_copy = [new_v if i==neighbor else i for i in neighbor_copy]
-                identity_insert = True
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram.
+    match (V,List[V]): Tuple of a vertex and its neighbors.
+
+    Returns: 
+    Nothing
+    """
+    vertex, neighbors = match
+    neighbors_copy = neighbors[:]
+
+    identity_inserted = True
+    while identity_inserted:
+        identity_inserted = False
+        for neighbor in graph.neighbors(vertex):
+            if graph.types()[neighbor] == VertexType.BOUNDARY:
+                new_vertex = insert_identity(graph, vertex, neighbor)
+                neighbors_copy = [new_vertex if i == neighbor else i for i in neighbors_copy]
+                identity_inserted = True
                 break    
 
-    phase_type = get_phase_type(g.phases()[v])
-    if phase_type != 1:
-        v_mid, gadget_top = insert_phase_gadget(g, v, Fraction(1,2))
-        neighbor_copy.append(v_mid)
-        apply_rule(g, lcomp, [(v, neighbor_copy)])
+    phase_type = get_phase_type(graph.phases()[vertex])
+
+    # If the phase type is not a true Clifford, insert a phase gadget
+    if phase_type != PhaseType.TRUE_CLIFFORD:
+        mid_vertex, gadget_top_vertex = insert_phase_gadget(graph, vertex, Fraction(1,2))
+        neighbors_copy.append(mid_vertex)
+        apply_rule(graph, lcomp, [(vertex, neighbors_copy)])
     else:
-        apply_rule(g, lcomp, [(v, neighbor_copy)])
+        apply_rule(graph, lcomp, [(vertex, neighbors_copy)])
 
-"""
-Applies pivoting on edge dependent on phase of its adjacent vertices and whether they are boundary or not
 
-- For each adjacent vertex v0 which is boundary an additional vertex and (Hadamard) wire is inserted to make v0 interior
-- For each adjacent vertex v0 with non-Clifford phase p, two additional vertices v1 and v2 are inserted on top:
-  v0 has phase 0, v1 has phase 0 and is connected to v0, v2 has phase p and is connected to v1
-  Pivoting removes v0, so v1 becomes a YZ spider with v2 corresponding to the measurement effect.
+def apply_pivot(graph: BaseGraph[VT,ET], matched_vertices):
+    """
+    Applies pivoting on edge dependent on phase of its adjacent vertices and whether they are boundary or not
 
-Parameters: 
-g (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-match (V,V): adjacent vertices of edge
+    - For each adjacent vertex v0 which is boundary an additional vertex and (Hadamard) wire is inserted to make v0 interior
+    - For each adjacent vertex v0 with non-Clifford phase p, two additional vertices v1 and v2 are inserted on top:
+    v0 has phase 0, v1 has phase 0 and is connected to v0, v2 has phase p and is connected to v1
+    Pivoting removes v0, so v1 becomes a YZ spider with v2 corresponding to the measurement effect.
 
-Returns: 
-Nothing
-"""
-def apply_pivot(g: BaseGraph[VT,ET], match):
-    v1,v2 = match
-    for vertex in [v1,v2]:
-        identity_insert = True
-        while identity_insert:
-            identity_insert = False
-            for neighbor in g.neighbors(vertex):
-                if g.types()[neighbor] == VertexType.BOUNDARY:
-                    insert_identity(g,vertex,neighbor)
-                    identity_insert = True
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    matched_vertices (V,V): adjacent vertices of edge
+
+    Returns: 
+    Nothing
+    """
+    vertex1, vertex2 = matched_vertices
+
+    for vertex in [vertex1, vertex2]:
+        identity_inserted = True
+        while identity_inserted:
+            identity_inserted = False
+
+            for neighbor in graph.neighbors(vertex):
+                if graph.types()[neighbor] == VertexType.BOUNDARY:
+                    insert_identity(graph, vertex, neighbor)
+                    identity_inserted = True
                     break
-        phase_type = get_phase_type(g.phases()[vertex])
-        if phase_type != 2:
-            _v_mid, _gadget_top = insert_phase_gadget(g, vertex, Fraction(0,1))
-            
-    apply_rule(g, pivot, [(v1,v2,[],[])])
+
+        phase_type = get_phase_type(graph.phases()[vertex])
+
+        if phase_type != PhaseType.CLIFFORD:
+            # Insert a phase gadget at the vertex with phase 0
+            _mid_vertex, _gadget_top_vertex = insert_phase_gadget(graph, vertex, Fraction(0,1))
+
+    # Apply the pivot rule to the matched vertices
+    apply_rule(graph, pivot, [(vertex1, vertex2, [], [])])
 

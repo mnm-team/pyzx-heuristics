@@ -3,113 +3,219 @@ import itertools
 from pyzx.graph.base import BaseGraph, VT, ET, EdgeType
 from pyzx.graph.graph_s import GraphS
 
-def calculate_lcomp(g: BaseGraph[VT,ET], u: VT):
-  vn = list(g.neighbors(u))
-  all_edges = set(itertools.combinations(vn,2))
-  remove_edges = set([(s,t) for s,t in all_edges if g.connected(s,t) and s in vn and t in vn])
-  add_edges= all_edges - remove_edges
-  g.remove_edges(remove_edges)
-  g.add_edges(add_edges, EdgeType.HADAMARD)
+def calculate_lcomp(graph: BaseGraph[VT,ET], vertex: VT):
+  """
+  Calculate local complementation for a given vertex in the graph.
 
-def get_odd_neighbourhood(g: BaseGraph[VT,ET], vertex_set):
+  Parameters:
+  graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+  vertex (VT): The vertex to calculate local complementation for.
+  """
+  vertex_neighbors = list(graph.neighbors(vertex))
+  all_possible_edges = set(itertools.combinations(vertex_neighbors, 2))
+
+  edges_to_remove = set([(source, target) for source, target in all_possible_edges if graph.connected(source, target) and source in vertex_neighbors and target in vertex_neighbors])
+  edges_to_add = all_possible_edges - edges_to_remove
+
+  graph.remove_edges(edges_to_remove)
+  graph.add_edges(edges_to_add, EdgeType.HADAMARD)
+
+def get_odd_neighbourhood(graph: BaseGraph[VT,ET], vertex_set):
+  """
+  Get the odd neighborhood for a set of vertices in the graph.
+
+  Parameters:
+  graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+  vertex_set (set): The set of vertices to get the odd neighborhood for.
+
+  Returns:
+  list: The list of vertices in the odd neighborhood.
+  """
   all_neighbors = set()
+
   for vertex in vertex_set:
-    all_neighbors.update(set(g.neighbors(vertex)))
+    all_neighbors.update(set(graph.neighbors(vertex)))
+
   odd_neighbors = []
+
   for neighbor in all_neighbors:
-    if len(set(g.neighbors(neighbor)).intersection(vertex_set)) % 2 == 1:
+    # If the intersection of the neighbor's neighbors and the vertex set has an odd length
+    if len(set(graph.neighbors(neighbor)).intersection(vertex_set)) % 2 == 1:
       odd_neighbors.append(neighbor)
+
   return odd_neighbors
 
-def get_all_v_for_lcomp(g, u, gf):
-  matches = []
-  for candidate in gf:
-    if u in get_odd_neighbourhood(g, gf[candidate]):
-      matches.append(candidate)
-  return matches
+def get_all_vertices_for_lcomp(graph: BaseGraph[VT,ET], vertex: VT, flow_dict: dict):
+  """
+  Get all vertices for which local complementation can be applied.
 
-def get_odd_neighbourhood_fast(g: BaseGraph[VT,ET], u: VT, gf):
-  candidates = []
-  u_neighbors = set(g.neighbors(u))
-  for key in gf: #TODO: this has runtime O(n²), simplify this to O(n) by reverse lookup dict
-    if len(u_neighbors.intersection(gf[key])) % 2 != 0:
-      candidates.append(key)
-  return candidates
+  Parameters:
+  graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+  vertex (VT): The vertex to calculate local complementation for.
+  flow_dict (dict): The dictionary representing the gflow of the graph.
 
-def update_lcomp_gflow(g: BaseGraph[VT,ET], u: VT, gf, set_difference_u=True):
-  candidates = get_all_v_for_lcomp(g, u, gf)
+  Returns:
+  list: The list of vertices for which local complementation can be applied.
+  """
+  matching_vertices = []
+  for candidate_vertex in flow_dict:
+    if vertex in get_odd_neighbourhood(graph, flow_dict[candidate_vertex]):
+      matching_vertices.append(candidate_vertex)
+  return matching_vertices
 
-  if set_difference_u:
-    gf[u].symmetric_difference_update(set([u]))
+def get_odd_neighbourhood_fast(graph: BaseGraph[VT,ET], vertex: VT, flow_dict: dict):
+  """
+  Get the odd neighborhood for a vertex in the graph in a fast way.
 
-  for candidate in candidates:
-    if candidate != u:
-      gf[candidate].symmetric_difference_update(gf[u])
-      gf[candidate].symmetric_difference_update(set([u]))
+  Parameters:
+  graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+  vertex (VT): The vertex to get the odd neighborhood for.
+  flow_dict (dict): The dictionary representing the gflow of the graph.
 
-  return gf
+  Returns:
+  list: The list of vertices in the odd neighborhood.
+  """
+  odd_neighbour_vertices = []
+  vertex_neighbors = set(graph.neighbors(vertex))
+  for key in flow_dict: #TODO: this has runtime O(n²), simplify this to O(n) by reverse lookup dict
+    if len(vertex_neighbors.intersection(flow_dict[key])) % 2 != 0:
+      odd_neighbour_vertices.append(key)
+  return odd_neighbour_vertices
 
-def update_gflow_from_double_insertion(gf, vs: VT, ve: VT, vid: VT, vend: VT):
-  if ve in gf[vs]:
-    gf[vend] = set([ve])
-    gf[vid] = set([vend])
-    gf[vs].remove(ve)
-    gf[vs].update(set([vid]))
-  elif vs in gf[ve]:
-    gf[vend] = set([vid])
-    gf[vid] = set([vs])
-    gf[ve].remove(vs)
-    gf[ve].update(set([vend]))
+def update_lcomp_gflow(graph: BaseGraph[VT,ET], vertex: VT, flow_dict: dict, set_difference_vertex=True):
+  """
+  Update the gflow of the graph after applying local complementation.
+
+  Parameters:
+  graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+  vertex (VT): The vertex to calculate local complementation for.
+  flow_dict (dict): The dictionary representing the gflow of the graph.
+  set_difference_vertex (bool): Whether to update the gflow of the vertex itself.
+
+  Returns:
+  dict: The updated gflow dictionary.
+  """
+  candidate_vertices = get_all_vertices_for_lcomp(graph, vertex, flow_dict)
+
+  if set_difference_vertex:
+    flow_dict[vertex].symmetric_difference_update(set([vertex]))
+
+  for candidate_vertex in candidate_vertices:
+    if candidate_vertex != vertex:
+      flow_dict[candidate_vertex].symmetric_difference_update(flow_dict[vertex])
+      flow_dict[candidate_vertex].symmetric_difference_update(set([vertex]))
+
+  return flow_dict
+
+def update_gflow_from_double_insertion(gflow, start_vertex: VT, end_vertex: VT, intermediate_vertex: VT, end_vertex_duplicate: VT):
+  """
+  Update the gflow after a double insertion operation.
+
+  Parameters:
+  gflow (dict): The dictionary representing the gflow of the graph.
+  start_vertex (VT): The start vertex of the edge where the insertion is performed.
+  end_vertex (VT): The end vertex of the edge where the insertion is performed.
+  intermediate_vertex (VT): The first vertex inserted between start_vertex and end_vertex.
+  end_vertex_duplicate (VT): The second vertex inserted between start_vertex and end_vertex.
+
+  Returns:
+  dict: The updated gflow dictionary.
+  """
+  if end_vertex in gflow[start_vertex]:
+    gflow[end_vertex_duplicate] = set([end_vertex])
+    gflow[intermediate_vertex] = set([end_vertex_duplicate])
+
+    gflow[start_vertex].remove(end_vertex)
+    gflow[start_vertex].update(set([intermediate_vertex]))
+
+  elif start_vertex in gflow[end_vertex]:
+    gflow[end_vertex_duplicate] = set([intermediate_vertex])
+    gflow[intermediate_vertex] = set([start_vertex])
+
+    gflow[end_vertex].remove(start_vertex)
+    gflow[end_vertex].update(set([end_vertex_duplicate]))
   else:
-    print("Fatal: unfusion neighbor not in gflow")
+    print("Fatal: unfusion neighbor not in graph gflow")
     # breakpoint()
-  return gf
+  return gflow
 
-def update_gflow_from_pivot(g: BaseGraph[VT,ET], u: VT, v: VT, gf):
-  g_copy = GraphS()
-  g_copy.graph = copy.deepcopy(g.graph)
+def update_gflow_from_pivot(graph: BaseGraph[VT,ET], pivot_vertex_1: VT, pivot_vertex_2: VT, gflow):
+  """
+  Update the graph gflow after a pivot operation.
 
-  update_lcomp_gflow(g_copy, u, gf)
-  calculate_lcomp(g_copy, u)
-  update_lcomp_gflow(g_copy, v, gf)
-  calculate_lcomp(g_copy, v)
-  update_lcomp_gflow(g_copy, u, gf, False) #no set difference at last time because u is YZ vertex
-  gf_u_yz = gf[u]
-  gf_v_yz = gf[v]
-  for key in gf:
-    if key == u or key == v:
+  Parameters:
+  graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+  pivot_vertex_1 (VT): The first vertex to pivot around.
+  pivot_vertex_2 (VT): The second vertex to pivot around.
+  gflow (dict): The dictionary representing the gflow of the graph.
+
+  Returns:
+  dict: The updated gflow dictionary.
+  """
+  graph_copy = GraphS()
+  graph_copy.graph = copy.deepcopy(graph.graph)
+
+  update_lcomp_gflow(graph_copy, pivot_vertex_1, gflow)
+  calculate_lcomp(graph_copy, pivot_vertex_1)
+
+  update_lcomp_gflow(graph_copy, pivot_vertex_2, gflow)
+  calculate_lcomp(graph_copy, pivot_vertex_2)
+
+  update_lcomp_gflow(graph_copy, pivot_vertex_1, gflow, False)
+
+  graph_flow_pivot_vertex_1 = gflow[pivot_vertex_1]
+  graph_flow_pivot_vertex_2 = gflow[pivot_vertex_2]
+
+  for key in gflow:
+    if key == pivot_vertex_1 or key == pivot_vertex_2:
       continue
-    if not u in gf[key] and not v in gf[key]:
+    if not pivot_vertex_1 in gflow[key] and not pivot_vertex_2 in gflow[key]:
       continue
-    if u in gf[key] and not v in gf[key].symmetric_difference(gf_u_yz):
-      gf[key].symmetric_difference_update(gf_u_yz)
-    elif v in gf[key] and not u in gf[key].symmetric_difference(gf_v_yz):
-      gf[key].symmetric_difference_update(gf_v_yz)
-    elif v in gf[key].symmetric_difference(gf_u_yz) and u in gf[key].symmetric_difference(gf_v_yz):
-      gf[key].symmetric_difference_update(gf_u_yz)
-      gf[key].symmetric_difference_update(gf_v_yz)
+    if pivot_vertex_1 in gflow[key] and not pivot_vertex_2 in gflow[key].symmetric_difference(graph_flow_pivot_vertex_1):
+      gflow[key].symmetric_difference_update(graph_flow_pivot_vertex_1)
+    elif pivot_vertex_2 in gflow[key] and not pivot_vertex_1 in gflow[key].symmetric_difference(graph_flow_pivot_vertex_2):
+      gflow[key].symmetric_difference_update(graph_flow_pivot_vertex_2)
+    elif pivot_vertex_2 in gflow[key].symmetric_difference(graph_flow_pivot_vertex_1) and pivot_vertex_1 in gflow[key].symmetric_difference(graph_flow_pivot_vertex_2):
+      gflow[key].symmetric_difference_update(graph_flow_pivot_vertex_1)
+      gflow[key].symmetric_difference_update(graph_flow_pivot_vertex_2)
     else:
       print("Fatal: no pivot gflow match!")
-  
-  for key in gf: 
-    if u in gf[key] and key != u:
-      gf[key].symmetric_difference_update(gf[u])
-  gf.pop(u)
 
-  for key in gf: 
-    if v in gf[key] and key != v:
-      gf[key].symmetric_difference_update(gf[v])
-  gf.pop(v)
+  # Update the gflow for all vertices that contain the first pivot vertex
+  for key in gflow: 
+    if pivot_vertex_1 in gflow[key] and key != pivot_vertex_1:
+      gflow[key].symmetric_difference_update(gflow[pivot_vertex_1])
+  gflow.pop(pivot_vertex_1)
 
-  return gf #TODO: return not necessary
+  # Update the gflow for all vertices that contain the second pivot vertex
+  for key in gflow: 
+    if pivot_vertex_2 in gflow[key] and key != pivot_vertex_2:
+      gflow[key].symmetric_difference_update(gflow[pivot_vertex_2])
+  gflow.pop(pivot_vertex_2)
 
-def update_gflow_from_lcomp(g: BaseGraph[VT,ET], u: VT, gf):
-  g_copy = GraphS()
-  g_copy.graph = copy.deepcopy(g.graph)
-  update_lcomp_gflow(g_copy, u, gf)
-  for key in gf: 
-    if u in gf[key] and key != u:
-      gf[key].symmetric_difference_update(gf[u])
-  gf.pop(u) #cleanup, i.e. remove lcomp vertex
+  return gflow
 
-  return gf
+def update_gflow_from_lcomp(graph: BaseGraph[VT,ET], lcomp_vertex: VT, gflow):
+  """
+  Update the gflow after a local complementation operation.
+
+  Parameters:
+  graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+  lcomp_vertex (VT): The vertex to perform local complementation on.
+  gflow (dict): The dictionary representing the gflow of the graph.
+
+  Returns:
+  dict: The updated gflow dictionary.
+  """
+  graph_copy = GraphS()
+  graph_copy.graph = copy.deepcopy(graph.graph)
+
+  update_lcomp_gflow(graph_copy, lcomp_vertex, gflow)
+
+  # Update the gflow for all vertices that contain the local complementation vertex
+  for key in gflow: 
+    if lcomp_vertex in gflow[key] and key != lcomp_vertex:
+      gflow[key].symmetric_difference_update(gflow[lcomp_vertex])
+  gflow.pop(lcomp_vertex)
+
+  return gflow
