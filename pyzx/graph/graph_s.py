@@ -1,4 +1,4 @@
-# PyZX - Python library for quantum circuit rewriting 
+# PyZX - Python library for quantum circuit rewriting
 #       and optimization using the ZX-calculus
 # Copyright (C) 2018 - Aleks Kissinger and John van de Wetering
 
@@ -15,7 +15,7 @@
 # limitations under the License.
 
 from fractions import Fraction
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Set, Any
 
 from .base import BaseGraph
 
@@ -25,9 +25,9 @@ class GraphS(BaseGraph[int,Tuple[int,int]]):
     """Purely Pythonic implementation of :class:`~graph.base.BaseGraph`."""
     backend = 'simple'
 
-    #The documentation of what these methods do 
+    #The documentation of what these methods do
     #can be found in base.BaseGraph
-    def __init__(self):
+    def __init__(self) -> None:
         BaseGraph.__init__(self)
         self.graph: Dict[int,Dict[int,EdgeType.Type]]   = dict()
         self._vindex: int                               = 0
@@ -38,12 +38,13 @@ class GraphS(BaseGraph[int,Tuple[int,int]]):
         self._maxq: FloatInt                            = -1
         self._rindex: Dict[int, FloatInt]               = dict()
         self._maxr: FloatInt                            = -1
+        self._grounds: Set[int] = set()
 
         self._vdata: Dict[int,Any]                      = dict()
         self._inputs: Tuple[int, ...]                   = tuple()
         self._outputs: Tuple[int, ...]                  = tuple()
-        
-    def clone(self):
+
+    def clone(self) -> 'GraphS':
         cpy = GraphS()
         for v, d in self.graph.items():
             cpy.graph[v] = d.copy()
@@ -57,8 +58,8 @@ class GraphS(BaseGraph[int,Tuple[int,int]]):
         cpy._maxr = self._maxr
         cpy._vdata = self._vdata.copy()
         cpy.scalar = self.scalar.copy()
-        cpy.inputs = self.inputs.copy()
-        cpy.outputs = self.outputs.copy()
+        cpy._inputs = tuple(list(self._inputs))
+        cpy._outputs = tuple(list(self._outputs))
         cpy.track_phases = self.track_phases
         cpy.phase_index = self.phase_index.copy()
         cpy.phase_master = self.phase_master
@@ -67,11 +68,11 @@ class GraphS(BaseGraph[int,Tuple[int,int]]):
         return cpy
 
     def vindex(self): return self._vindex
-    def depth(self): 
+    def depth(self):
         if self._rindex: self._maxr = max(self._rindex.values())
         else: self._maxr = -1
         return self._maxr
-    def qubit_count(self): 
+    def qubit_count(self):
         if self._qindex: self._maxq = max(self._qindex.values())
         else: self._maxq = -1
         return self._maxq + 1
@@ -101,16 +102,16 @@ class GraphS(BaseGraph[int,Tuple[int,int]]):
             self._phase[i] = 0
         self._vindex += amount
         return range(self._vindex - amount, self._vindex)
-    def add_vertex_indexed(self, index):
+    def add_vertex_indexed(self, v):
         """Adds a vertex that is guaranteed to have the chosen index (i.e. 'name').
         If the index isn't available, raises a ValueError.
         This method is used in the editor to support undo, which requires vertices
         to preserve their index."""
-        if index in self.graph: raise ValueError("Vertex with this index already exists")
-        if index >= self._vindex: self._vindex = index+1
-        self.graph[index] = dict()
-        self.ty[index] = VertexType.BOUNDARY
-        self._phase[index] = 0
+        if v in self.graph: raise ValueError("Vertex with this index already exists")
+        if v >= self._vindex: self._vindex = v+1
+        self.graph[v] = dict()
+        self.ty[v] = VertexType.BOUNDARY
+        self._phase[v] = 0
 
     def add_edges(self, edges, edgetype=EdgeType.SIMPLE, smart=False):
         for s,t in edges:
@@ -130,12 +131,17 @@ class GraphS(BaseGraph[int,Tuple[int,int]]):
             del self.graph[v]
             del self.ty[v]
             del self._phase[v]
+            if v in self._inputs:
+                self._inputs = tuple(u for u in self._inputs if u != v)
+            if v in self._outputs:
+                self._outputs = tuple(u for u in self._outputs if u != v)
             try: del self._qindex[v]
             except: pass
             try: del self._rindex[v]
             except: pass
             try: del self.phase_index[v]
             except: pass
+            self._grounds.discard(v)
             self._vdata.pop(v,None)
         self._vindex = max(self.vertices(),default=0) + 1
 
@@ -175,8 +181,8 @@ class GraphS(BaseGraph[int,Tuple[int,int]]):
                 if v1 > v0: yield (v0,v1)
 
     def edges_in_range(self, start, end, safe=False):
-        """like self.edges, but only returns edges that belong to vertices 
-        that are only directly connected to other vertices with 
+        """like self.edges, but only returns edges that belong to vertices
+        that are only directly connected to other vertices with
         index between start and end.
         If safe=True then it also checks that every neighbour is only connected to vertices with the right index"""
         if not safe:
@@ -239,10 +245,16 @@ class GraphS(BaseGraph[int,Tuple[int,int]]):
     def phases(self):
         return self._phase
     def set_phase(self, vertex, phase):
-        self._phase[vertex] = Fraction(phase) % 2
+        try:
+            self._phase[vertex] = Fraction(phase) % 2
+        except Exception:
+            self._phase[vertex] = phase
     def add_to_phase(self, vertex, phase):
-        self._phase[vertex] = (self._phase.get(vertex,Fraction(1)) + phase) % 2
-
+        old_phase = self._phase.get(vertex, Fraction(1))
+        try:
+            self._phase[vertex] = (old_phase + Fraction(phase)) % 2
+        except Exception:
+            self._phase[vertex] = old_phase + phase
     def qubit(self, vertex):
         return self._qindex.get(vertex,-1)
     def qubits(self):
@@ -258,6 +270,16 @@ class GraphS(BaseGraph[int,Tuple[int,int]]):
     def set_row(self, vertex, r):
         if r > self._maxr: self._maxr = r
         self._rindex[vertex] = r
+
+    def is_ground(self, vertex):
+        return vertex in self._grounds
+    def grounds(self):
+        return self._grounds
+    def set_ground(self, vertex, flag=True):
+        if flag:
+            self._grounds.add(vertex)
+        else:
+            self._grounds.discard(vertex)
 
     def vdata_keys(self, vertex):
         return self._vdata.get(vertex, {}).keys()

@@ -203,6 +203,19 @@ def apply_copy(
     return ({}, rem, [], True)
 
 
+def is_NOT_gate(g, v, n1, n2):
+    """Returns whether the vertex v in graph g is a NOT gate between its neighbours n1 and n2."""
+    if g.edge_type(g.edge(n1,v)) == EdgeType.SIMPLE and g.type(v) == VertexType.X: 
+        if g.edge_type(g.edge(n2,v)) != EdgeType.SIMPLE:
+            return False
+    elif g.edge_type(g.edge(n1,v)) == EdgeType.HADAMARD and g.type(v) == VertexType.Z: 
+        if g.edge_type(g.edge(n2,v)) != EdgeType.HADAMARD:
+            return False
+    else:
+        return False
+    return True
+
+
 def match_hbox_parallel_not(
         g: BaseGraph[VT,ET], 
         vertexf:Optional[Callable[[VT],bool]]=None
@@ -222,13 +235,8 @@ def match_hbox_parallel_not(
             if g.vertex_degree(n) != 2 or phases[n] != 1: continue # If it turns out to be useful, this rule can be generalised to allow spiders of arbitrary phase here
             v = [v for v in g.neighbors(n) if v != h][0] # The other neighbor of n
             if not g.connected(v,h): continue
-            if types[v] != VertexType.Z or g.edge_type(g.edge(h,v)) != EdgeType.SIMPLE: continue
-            if g.edge_type(g.edge(h,n)) == EdgeType.SIMPLE and types[n] == VertexType.X: 
-                if g.edge_type(g.edge(v,n)) != EdgeType.SIMPLE:
-                    continue
-            if g.edge_type(g.edge(h,n)) == EdgeType.HADAMARD and types[n] == VertexType.Z: 
-                if g.edge_type(g.edge(v,n)) != EdgeType.HADAMARD:
-                    continue
+            if not is_NOT_gate(g,n,h,v):
+                continue
             break
         else:
             continue
@@ -240,6 +248,7 @@ def match_hbox_parallel_not(
 def hbox_parallel_not_remove(g: BaseGraph[VT,ET], 
         matches: List[Tuple[VT,VT,VT]]
         ) -> rules.RewriteOutputType[ET,VT]:
+    """If a Z-spider is connected to an H-box via a regular wire and a NOT, then they disconnect, and the H-box is turned into a Z-spider."""
     rem = []
     etab = {}
     types = g.types()
@@ -332,6 +341,94 @@ def par_hbox(g: BaseGraph[VT,ET], matches: List[TYPE_MATCH_PAR_HBOX]) -> rules.R
         else: g.set_phase(hs[0], p)
     
     return ({}, rem_verts, [], False)
+
+
+TYPE_MATCH_PAR_HBOX_INTRO = Tuple[VT,VT,VT,List[VT],Set[VT]]
+def match_par_hbox_intro(
+    g: BaseGraph[VT,ET],
+    vertexf: Optional[Callable[[VT],bool]] = None
+    ) -> List[TYPE_MATCH_PAR_HBOX_INTRO]:
+    """Matches sets of H-boxes that are connected in parallel (via optional NOT gates)
+    to the same white spiders, but with just one NOT different, so that the Intro rule can be applied there."""
+    if vertexf is not None: candidates = set([v for v in g.vertices() if vertexf(v)])
+    else: candidates = g.vertex_set()
+    
+    groupings: Dict[FrozenSet[VT], List[Tuple[VT,List[VT],Set[VT],Set[VT],Set[VT]]]] = dict()
+    ty = g.types()
+    for h in candidates:
+        if ty[h] != VertexType.H_BOX: continue
+        suitable = True
+        neighbors_regular = set()
+        neighbors_NOT = set()
+        neighbors_single = set()  # Single-arity Z-spiders connected to the H-box.
+        NOTs = []
+        for v in g.neighbors(h):
+            e = g.edge(v,h)
+            if g.edge_type(e) == EdgeType.HADAMARD:
+                if ty[v] != VertexType.Z or g.vertex_degree(v) != 2 or g.phase(v) != 1: 
+                    suitable = False
+                    break
+                w = [w for w in g.neighbors(v) if w!=h][0]  # unique other neighbor
+                if ty[w] != VertexType.Z or g.edge_type(g.edge(v,w)) != EdgeType.HADAMARD:
+                    suitable = False
+                    break
+                neighbors_NOT.add(w)
+                NOTs.append(v)
+            else: # e == EdgeType.SIMPLE
+                if ty[v] == VertexType.Z:
+                    if g.vertex_degree(v) == 1:
+                        if g.phase(v) != 0:
+                            suitable = False
+                            break
+                        neighbors_single.add(v)
+                    else:
+                        neighbors_regular.add(v)
+                else:
+                    if ty[v] != VertexType.X or g.vertex_degree(v) != 2 or g.phase(v) != 1:
+                        suitable = False
+                        break
+                    w = [w for w in g.neighbors(v) if w!=h][0]  # unique other neighbor
+                    if ty[w] != VertexType.Z or g.edge_type(g.edge(v,w)) != EdgeType.SIMPLE:
+                        suitable = False
+                        break
+                    neighbors_NOT.add(w)
+                    NOTs.append(v)
+        if not suitable: continue
+        group = frozenset(neighbors_regular | neighbors_NOT)
+        if group not in groupings: 
+            groupings[group] = [(h,NOTs, neighbors_regular, neighbors_NOT, neighbors_single)]
+            continue
+        # There is another H-box with the same set of neighbours
+        for h2, NOTs2, neighbors_regular2, neighbors_NOT2, neighbors_single2 in groupings[group]:
+            vs = neighbors_regular.symmetric_difference(neighbors_regular2)
+            if g.phase(h) != g.phase(h2): continue  # TODO: Allow intro rule with different phases.
+            if len(neighbors_single) != len(neighbors_single2): continue  # TODO: Allow different sets of neighbours here.
+            if len(vs) != 1: # To use the Intro rule, the H-boxes should differ on exactly one position on where there are NOTs.
+                continue
+            # We have a match!
+            v = vs.pop() 
+            break
+        else:
+            continue
+        if v in neighbors_regular2:  # Make it so that h is the vertex that remains
+            h,h2 = h2, h
+            NOTs2 = NOTs
+            neighbors_single2 = neighbors_single
+        return [(h,h2,v,NOTs2,neighbors_single2)]
+    return []
+
+def par_hbox_intro(g: BaseGraph[VT,ET], matches: List[TYPE_MATCH_PAR_HBOX_INTRO]) -> rules.RewriteOutputType[ET,VT]:
+    """Removes an H-box according to the Intro rule (See Section 3.2 of arxiv:2103.06610)."""
+    rem_verts = []
+    rem_edges = []
+    for h, h2, v, NOTs, singles in matches:
+        rem_verts.append(h2)
+        rem_verts.extend(singles)
+        rem_verts.extend(NOTs)
+        rem_edges.append(g.edge(h,v))
+        g.scalar.add_power(2*len(singles))
+    return ({}, rem_verts, rem_edges, True)
+
 
 def match_zero_hbox(g: BaseGraph[VT,ET]) -> List[VT]:
     """Matches H-boxes that have a phase of 2pi==0."""

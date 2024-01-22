@@ -11,11 +11,17 @@ PyZX
    :caption: Contents:
    
    gettingstarted
+   faq
    simplify
    graph
    representations
    api
 
+.. toctree::
+   :caption: Notebooks:
+
+   notebooks/gettingstarted
+   notebooks/gates
 
 Indices and tables
 ==================

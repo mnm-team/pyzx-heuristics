@@ -24,14 +24,16 @@ use the power of :func:`full_reduce` while not changing the structure of the gra
 __all__ = ['bialg_simp','spider_simp', 'id_simp', 'phase_free_simp', 'pivot_simp',
         'pivot_gadget_simp', 'pivot_boundary_simp', 'gadget_simp',
         'lcomp_simp', 'clifford_simp', 'tcount', 'to_gh', 'to_rg',
-        'full_reduce', 'teleport_reduce', 'reduce_scalar', 'supplementarity_simp']
+        'full_reduce', 'teleport_reduce', 'reduce_scalar', 'supplementarity_simp',
+        'to_clifford_normal_form_graph']
 
-from typing import List, Callable, Optional, Union, Generic, Tuple, Dict, Iterator
+from typing import List, Callable, Optional, Union, Generic, Tuple, Dict, Iterator, cast
+from pyzx.heuristics.neighbor_unfusion import greedy_wire_reduce_neighbor, random_wire_reduce_neighbor, sim_annealing_reduce_neighbor
+
+from pyzx.heuristics.simplify import greedy_wire_reduce, random_wire_reduce, simulated_annealing_reduce
 
 from .utils import EdgeType, VertexType, toggle_edge, vertex_is_zx, toggle_vertex
 from .rules import *
-from .heuristics.simplify import greedy_wire_reduce, random_wire_reduce, simulated_annealing_reduce
-from .heuristics.neighbor_unfusion import greedy_wire_reduce_neighbor, sim_annealing_reduce_neighbor, random_wire_reduce_neighbor
 from .graph.base import BaseGraph, VT, ET
 from .circuit import Circuit
 
@@ -117,7 +119,7 @@ def pivot_boundary_simp(g: BaseGraph[VT,ET], matchf:Optional[Callable[[ET],bool]
 def lcomp_simp(g: BaseGraph[VT,ET], matchf:Optional[Callable[[VT],bool]]=None, quiet:bool=False, stats:Optional[Stats]=None) -> int:
     return simp(g, 'lcomp_simp', match_lcomp_parallel, lcomp, matchf=matchf, quiet=quiet, stats=stats)
 
-def bialg_simp(g: BaseGraph[VT,ET], quiet:bool=False, stats: Stats=None) -> int:
+def bialg_simp(g: BaseGraph[VT,ET], quiet:bool=False, stats: Optional[Stats]=None) -> int:
     return simp(g, 'bialg_simp', match_bialg_parallel, bialg, quiet=quiet, stats=stats)
 
 def spider_simp(g: BaseGraph[VT,ET], matchf:Optional[Callable[[VT],bool]]=None, quiet:bool=False, stats:Optional[Stats]=None) -> int:
@@ -336,7 +338,7 @@ class Simplifier(Generic[VT, ET]):
         if (p2 == 0 or p2.denominator <= 2): # Deleted vertex contains Clifford phase
             if v2 in self.phantom_phases:
                 v3,i3 = self.phantom_phases[v2]
-                m2 = m2*self.simplifygraph.phase_mult[i3] # type: ignore
+                m2 = cast(Literal[1, -1], m2*self.simplifygraph.phase_mult[i3])
                 v2,i2 = v3,i3
                 p2 = self.mastergraph.phase(v2)
             else: return
@@ -350,7 +352,7 @@ class Simplifier(Generic[VT, ET]):
                 if (p1+p2).denominator <= 2:
                     del self.phantom_phases[v1]
                 v1,i1 = v3,i3
-                m1 = m1*self.simplifygraph.phase_mult[i3] # type: ignore
+                m1 = cast(Literal[1, -1], m1*self.simplifygraph.phase_mult[i3])
             else:
                 self.phantom_phases[v1] = (v2,i2)
                 self.simplifygraph.phase_mult[i2] = m2
@@ -364,7 +366,7 @@ class Simplifier(Generic[VT, ET]):
 
         self.simplifygraph.phase_mult[i2] = 1
 
-    def full_reduce(self, quiet:bool=True, stats: Stats=None) -> None:
+    def full_reduce(self, quiet:bool=True, stats:Optional[Stats]=None) -> None:
         full_reduce(self.simplifygraph,quiet=quiet, stats=stats)
 
 
@@ -447,20 +449,64 @@ def spider_iter(g: BaseGraph[VT,ET]) -> Iterator[Tuple[BaseGraph[VT,ET],str]]:
 def id_iter(g: BaseGraph[VT,ET]) -> Iterator[Tuple[BaseGraph[VT,ET],str]]:
     return simp_iter(g, 'id', match_ids_parallel, remove_ids)
 
+def pivot_gadget_iter(g: BaseGraph[VT,ET]) -> Iterator[Tuple[BaseGraph[VT,ET],str]]:
+    return simp_iter(g, 'pivot_gadget', match_pivot_gadget, pivot)
+
+def gadget_iter(g: BaseGraph[VT,ET]) -> Iterator[Tuple[BaseGraph[VT,ET],str]]:
+    return simp_iter(g, 'gadget', match_phase_gadgets, merge_phase_gadgets)
+
+def pivot_boundary_iter(g: BaseGraph[VT,ET]) -> Iterator[Tuple[BaseGraph[VT,ET],str]]:
+    return simp_iter(g, 'pivot_boundary', match_pivot_boundary, pivot)
+
 def clifford_iter(g: BaseGraph[VT,ET]) -> Iterator[Tuple[BaseGraph[VT,ET],str]]:
+    ok = True
+    while ok:
+        ok = False
+        for g, step in interior_clifford_iter(g):
+            yield g, step
+        for g, step in pivot_boundary_iter(g):
+            ok = True
+            yield g, step
+
+def interior_clifford_iter(g: BaseGraph[VT,ET]) -> Iterator[Tuple[BaseGraph[VT,ET],str]]:
     yield from spider_iter(g)
     to_gh(g)
     yield g, "to_gh"
-    yield from spider_iter(g)
-    yield from pivot_iter(g)
-    yield from lcomp_iter(g)
-    yield from pivot_iter(g)
-    yield from id_iter(g)
-    yield from spider_iter(g)
+    ok = True
+    while ok:
+        ok = False
+        for g, step in id_iter(g):
+            ok = True
+            yield g, step
+        for g, step in spider_iter(g):
+            ok = True
+            yield g, step
+        for g, step in pivot_iter(g):
+            ok = True
+            yield g, step
+        for g, step in lcomp_iter(g):
+            ok = True
+            yield g, step
 
+def full_reduce_iter(g: BaseGraph[VT,ET]) -> Iterator[Tuple[BaseGraph[VT,ET],str]]:
+    yield from interior_clifford_iter(g)
+    yield from pivot_gadget_iter(g)
+    ok = True
+    while ok:
+        ok = False
+        for g, step in clifford_iter(g):
+            yield g, f"clifford -> {step}"
+        for g, step in gadget_iter(g):
+            ok = True
+            yield g, f"gadget -> {step}"
+        for g, step in interior_clifford_iter(g):
+            yield g, f"interior_clifford -> {step}"
+        for g, step in pivot_gadget_iter(g):
+            ok = True
+            yield g, f"pivot_gadget -> {step}"
 
-def is_graph_like(g):
-    """Puts a ZX-diagram in graph-like form"""
+def is_graph_like(g: BaseGraph[VT,ET]) -> bool:
+    """Checks if a ZX-diagram is graph-like."""
 
     # checks that all spiders are Z-spiders
     for v in g.vertices():
@@ -499,8 +545,8 @@ def is_graph_like(g):
     return True
 
 
-def to_graph_like(g):
-    """Checks if a ZX-diagram is graph-like"""
+def to_graph_like(g: BaseGraph[VT,ET]) -> None:
+    """Puts a ZX-diagram in graph-like form."""
 
     # turn all red spiders into green spiders
     to_gh(g)
@@ -556,3 +602,95 @@ def to_graph_like(g):
             g.add_edge(g.edge(z2, v), edgetype=EdgeType.HADAMARD)
 
     assert(is_graph_like(g))
+
+def to_clifford_normal_form_graph(g: BaseGraph[VT,ET]) -> None:
+    """Converts a graph that is Clifford into the form described by the right-hand side of eq. (11) of
+    *Graph-theoretic Simplification of Quantum Circuits with the ZX-calculus* (https://arxiv.org/abs/1902.03178).
+    That is, writes it as a series of layers: 
+    Hadamards, phase gates, CZ gates, parity form of Z-spiders to X-spiders, Hadamards, CZ gates, phase gates, Hadamards.
+    Changes the graph in place.
+    """
+    full_reduce(g)
+    g.normalize()
+    # At this point the only vertices g should have are those directly connected to an input or an output (and not both).
+    if any([((g.phase(v)*4) % 2 != 0) for v in g.vertices()]):  # If any phase is not a multiple of 1/2, then this will fail.
+        raise ValueError("Specified graph is not Clifford.")
+
+    inputs = list(g.inputs())
+    outputs = list(g.outputs())
+    v_inputs = [list(g.neighbors(i))[0] for i in inputs] # input vertices should have a unique spider neighbor
+    v_outputs = [list(g.neighbors(o))[0] for o in outputs] # input vertices should have a unique spider neighbor
+    # create more spacing
+    for v in v_inputs:
+        g.set_row(v, 3)
+    for v in v_outputs:
+        g.set_row(v,  5)
+    for o in outputs:
+        g.set_row(o, 8)
+    
+    # Separate out the Hadamards 
+    for q in range(len(inputs)):
+        v = v_inputs[q]
+        i = inputs[q]
+        e = g.edge(v,i)
+        if g.edge_type(e) == EdgeType.HADAMARD or g.phase(v) != 0:
+            h = g.add_vertex(VertexType.Z, q, row=1, phase=g.phase(v))
+            g.add_edge(g.edge(i,h),EdgeType.HADAMARD)
+            g.add_edge(g.edge(h,v),EdgeType.SIMPLE)
+            g.remove_edge(e)
+            g.set_phase(v,0)
+            inputs[q] = h
+    
+    for q in range(len(outputs)):
+        v = v_outputs[q]
+        o = outputs[q]
+        e = g.edge(v,o)
+        if g.edge_type(e) == EdgeType.HADAMARD or g.phase(v) != 0:
+            h = g.add_vertex(VertexType.Z, q, row=7, phase=g.phase(v))
+            g.add_edge(g.edge(h,o),EdgeType.HADAMARD)
+            g.add_edge(g.edge(v,h),EdgeType.SIMPLE)
+            g.remove_edge(e)
+            g.set_phase(v,0)
+            outputs[q] = h
+    
+    # Unfuse the czs on the inputs
+    czs = []
+    cz_qubits = set()
+    for q1 in range(len(inputs)):
+        for q2 in range(q1+1,len(inputs)):
+            if g.connected(v_inputs[q1],v_inputs[q2]):
+                g.remove_edge(g.edge(v_inputs[q1],v_inputs[q2]))
+                czs.append((q1,q2))
+                cz_qubits.add(q1)
+                cz_qubits.add(q2)
+    cz_v = {}
+    for q in cz_qubits:
+        w = g.add_vertex(VertexType.Z,q,row=2)
+        g.remove_edge(g.edge(inputs[q],v_inputs[q]))
+        g.add_edge(g.edge(inputs[q],w))
+        g.add_edge(g.edge(w,v_inputs[q]))
+        cz_v[q] = w
+    for q1,q2 in czs:
+        g.add_edge(g.edge(cz_v[q1],cz_v[q2]),EdgeType.HADAMARD)
+    
+    # Unfuse the czs on the outputs
+    czs = []
+    cz_qubits = set(range(len(outputs))) # We actually definitely need to add another spider at every position, as we are going to introduce Hadamards everywhere later
+    for q1 in range(len(outputs)):
+        for q2 in range(q1+1,len(outputs)):
+            if g.connected(v_outputs[q1],v_outputs[q2]):
+                g.remove_edge(g.edge(v_outputs[q1],v_outputs[q2]))
+                czs.append((q1,q2))
+                cz_qubits.add(q1)
+                cz_qubits.add(q2)
+    cz_v = {}
+    for q in cz_qubits:
+        w = g.add_vertex(VertexType.Z,q,row=6)
+        g.remove_edge(g.edge(v_outputs[q],outputs[q]))
+        g.add_edge(g.edge(w,outputs[q]))
+        g.add_edge(g.edge(v_outputs[q],w))
+        cz_v[q] = w
+    for q1,q2 in czs:
+        g.add_edge(g.edge(cz_v[q1],cz_v[q2]),EdgeType.HADAMARD)
+    
+    to_rg(g,select=lambda v: v in v_outputs)

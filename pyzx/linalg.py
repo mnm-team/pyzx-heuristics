@@ -15,10 +15,8 @@
 # limitations under the License.
 
 import math
-from typing import Union, Any, Tuple, List, Optional, Set, Dict
+from typing import Union, Any, Tuple, List, Optional, Dict, cast
 from typing_extensions import Literal
-
-import numpy as np
 
 from .circuit.gates import CNOT
 
@@ -51,8 +49,8 @@ class Mat2(object):
     def __init__(self, data: MatLike):
         self.data: MatLike = data
     def __mul__(self, m: 'Mat2') -> 'Mat2':
-        return Mat2([[sum(self.data[i][k] * m.data[k][j] for k in range(len(m.data))) % 2 #type: ignore # mypy doesn't understand literals
-                      for j in range(len(m.data[0]))] for i in range(len(self.data))]) #type: ignore # mypy doesn't understand literals
+        return Mat2([[cast(Z2, sum(self.data[i][k] * m.data[k][j] for k in range(len(m.data))) % 2)
+                      for j in range(len(m.data[0]))] for i in range(len(self.data))])
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Mat2): return False
         if self.rows() != other.rows() or self.cols() != other.cols(): return False
@@ -137,7 +135,13 @@ class Mat2(object):
             v = self.data[r][c0]
             self.data[r][c0] = self.data[r][c1]
             self.data[r][c1] = v
-
+    
+    def permute_rows(self, p: List[int]) -> None:
+        """Permute the rows of the matrix according to the permutation p."""
+        self.data = [self.data[i] for i in p]
+    def permute_cols(self, p: List[int]) -> None:
+        """Permute the columns of the matrix according to the permutation p."""
+        self.data = [[self.data[i][j] for j in p] for i in range(self.rows())]
     
     def gauss(self, full_reduce:bool=False, x:Any=None, y:Any=None, blocksize:int=6, pivot_cols:List[int]=[]) -> int:
         """Compute the echelon form. Returns the number of non-zero rows in the result, i.e.

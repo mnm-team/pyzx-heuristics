@@ -1,4 +1,4 @@
-# PyZX - Python library for quantum circuit rewriting 
+# PyZX - Python library for quantum circuit rewriting
 #        and optimization using the ZX-calculus
 # Copyright (C) 2018 - Aleks Kissinger and John van de Wetering
 
@@ -49,67 +49,69 @@ begin
 end
 ```
 """
-from typing import List, Dict, Set, Tuple, Optional
-from .linalg import Mat2, CNOTMaker
-from .graph.base import BaseGraph, VT, ET
+
+from typing import Dict, Set, Tuple, Optional
+
+from .extract import bi_adj
+from .linalg import Mat2
+from .graph.base import BaseGraph, VertexType, VT, ET
 
 
-def gflow(g: BaseGraph[VT,ET]) -> Optional[Tuple[Dict[VT,int], Dict[VT,Set[VT]], int]]:
-    l:     Dict[VT,int]      = {}
+def gflow(
+    g: BaseGraph[VT, ET]
+) -> Optional[Tuple[Dict[VT, int], Dict[VT, Set[VT]], int]]:
+    """Compute the maximally delayed gflow of a diagram in graph-like form.
+
+    Based on algorithm by Perdrix and Mhalla.
+    See dx.doi.org/10.1007/978-3-540-70575-8_70
+    """
+    l: Dict[VT, int] = {}
     gflow: Dict[VT, Set[VT]] = {}
-    for v in g.outputs():
+
+    inputs: Set[VT] = set(g.inputs())
+    processed: Set[VT] = set(g.outputs()) | g.grounds()
+    vertices: Set[VT] = set(g.vertices())
+    pattern_inputs: Set[VT] = set()
+    for inp in inputs:
+        if g.type(inp) == VertexType.BOUNDARY:
+            pattern_inputs |= set(g.neighbors(inp))
+        else:
+            pattern_inputs.add(inp)
+    k: int = 1
+
+    for v in processed:
         l[v] = 0
 
-    inputs = set(g.inputs())
-    processed = set(g.outputs())
-    vertices = set(g.vertices())
-    k = 1
     while True:
         correct = set()
-        #unprocessed = list()
-        processed_prime = [v for v in processed.difference(inputs) if any(w not in processed for w in g.neighbors(v))]
-        candidates = [v for v in vertices.difference(processed) if any(w in processed_prime for w in g.neighbors(v))]
-        
+        # unprocessed = list()
+        processed_prime = [
+            v
+            for v in processed.difference(pattern_inputs)
+            if any(w not in processed for w in g.neighbors(v))
+        ]
+        candidates = [
+            v
+            for v in vertices.difference(processed)
+            if any(w in processed_prime for w in g.neighbors(v))
+        ]
+
         zerovec = Mat2([[0] for i in range(len(candidates))])
-        #print(unprocessed, processed_prime, zerovec)
+        # print(unprocessed, processed_prime, zerovec)
         m = bi_adj(g, processed_prime, candidates)
-        cnot_maker = CNOTMaker()
-        m.gauss(x=cnot_maker, full_reduce=True)
         for u in candidates:
             vu = zerovec.copy()
             vu.data[candidates.index(u)] = [1]
-            x = get_gauss_solution(m, vu, cnot_maker.cnots)
+            x = m.solve(vu)
             if x:
                 correct.add(u)
                 gflow[u] = {processed_prime[i] for i in range(x.rows()) if x.data[i][0]}
                 l[u] = k
 
         if not correct:
-            if not candidates:
+            if vertices.difference(processed) == inputs.difference(pattern_inputs):
                 return l, gflow, k
             return None
         else:
             processed.update(correct)
             k += 1
-
-def get_gauss_solution(gauss: Mat2, vec: Mat2, cnots: CNOTMaker):
-  for cnot in cnots:
-    vec.row_add(cnot.target,cnot.control)
-  x = Mat2.zeros(gauss.cols(),1)
-  for i,row in enumerate(gauss.data):
-      got_pivot = False
-      for j,v in enumerate(row):
-          if v != 0:
-              got_pivot = True
-              x.data[j][0] = vec.data[i][0]
-              break
-      # zero LHS with non-zero RHS = no solutions
-      if not got_pivot and vec.data[i][0] != 0:
-          return None
-  return x
-
-#Copy from extract.py but necessary since otherwise we have circular import problems
-def bi_adj(g: BaseGraph[VT,ET], vs:List[VT], ws:List[VT]) -> Mat2:
-    """Construct a biadjacency matrix between the supplied list of vertices
-    ``vs`` and ``ws``."""
-    return Mat2([[1 if g.connected(v,w) else 0 for v in vs] for w in ws])

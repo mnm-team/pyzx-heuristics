@@ -14,12 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__version__ = "0.6.4"
+__version__ = "0.7.3"
 
 from .graph.graph import Graph
 from .circuit import Circuit, gates, id
 from .linalg import Mat2
 from .utils import settings, VertexType, EdgeType
+from .quimb import to_quimb_tensor
 from .drawing import *
 from .simplify import *
 from .optimize import *

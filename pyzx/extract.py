@@ -14,18 +14,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__all__ = ['extract_circuit', 'extract_simple', 'graph_to_swaps', 'lookahead_extract_base', 'lookahead_full',
-           'lookahead_fast', 'lookahead_extract']
+__all__ = ['extract_circuit', 'extract_simple', 'graph_to_swaps', 'extract_clifford_normal_form',
+           'lookahead_extract_base', 'lookahead_full', 'lookahead_fast', 'lookahead_extract']
 
 from fractions import Fraction
 import itertools
 
 from .utils import EdgeType, VertexType, toggle_edge
 from .linalg import Mat2, Z2
-from .simplify import id_simp, tcount
-from .rules import apply_rule, pivot, match_spider_parallel, spider, lcomp
+from .simplify import id_simp, tcount,full_reduce
+from .rules import apply_rule, pivot, match_spider_parallel, spider
 from .circuit import Circuit
-from .circuit.gates import Gate, ParityPhase, CNOT, HAD, ZPhase, XPhase, CZ, CX, SWAP, InitAncilla
+from .circuit.gates import Gate, ParityPhase, CNOT, HAD, ZPhase, XPhase, CZ, XCX, SWAP, InitAncilla
 
 from .graph.base import BaseGraph, VT, ET
 
@@ -107,8 +107,8 @@ def column_optimal_swap(m: Mat2) -> Dict[int,int]:
     return target
 
 def _find_targets(
-        conn: Dict[int,Set[int]], 
-        connr: Dict[int,Set[int]], 
+        conn: Dict[int,Set[int]],
+        connr: Dict[int,Set[int]],
         target:Dict[int,int]={}
         ) -> Optional[Dict[int,int]]:
     """Helper function for :func:`column_optimal_swap`.
@@ -117,10 +117,10 @@ def _find_targets(
     target = target.copy()
     r = len(conn)
     c = len(connr)
-    
+
     claimedcols = set(target.keys())
     claimedrows = set(target.values())
-    
+
     while True:
         min_index = -1
         min_options = set(range(1000))
@@ -206,7 +206,7 @@ def greedy_reduction(m: Mat2) -> Optional[List[Tuple[int, int]]]:
     if indicest is None: return indicest
     indices = list(indicest)
     rows = {i:m.data[i] for i in indices}
-    weights = {i: sum(r) for i,r in rows.items()}
+    weights: Dict[int,int] = {i: sum(r) for i,r in rows.items()}
     result = []
     while len(indices)>1:
         best = (-1,-1)
@@ -234,13 +234,13 @@ def flat_indices(m: Mat2, indices: List[int]) -> Tuple[List[Tuple[int, int]], in
     returns a list of row operations and the index of the row that would end up with
     the sum of the input rows.
 
-    When transformed into CNOTs, the the depth of the circuit is log_2(len(indices)).
+    When transformed into CNOTs, the depth of the circuit is log_2(len(indices)).
 
     If the list of indices is empty, returns ([], -1)"""
     if len(indices) == 0:
         return [], -1
     rows = {i: m.data[i] for i in indices}
-    weights = {i: sum(r) for i, r in rows.items()}
+    weights: Dict[int,int] = {i: sum(r) for i, r in rows.items()}
     result = []
     next_indices = []
     while len(indices) > 1:
@@ -274,7 +274,7 @@ def flat_indices(m: Mat2, indices: List[int]) -> Tuple[List[Tuple[int, int]], in
 def greedy_reduction_flat(m: Mat2) -> Optional[List[Tuple[int, int]]]:
     """Returns a list of tuples (r1,r2) that specify which row should be added to which other row
     in order to reduce one row of m to only contain a single 1.
-    In contrast to :func:`greedy_reduction`, it preforms the brute-force search starting with the
+    In contrast to :func:`greedy_reduction`, it performs the brute-force search starting with the
     highest indices, and places the row operations in such a way that the resulting depth is log_2
     of the number of rows that have to be added together.
     Used in :func:`lookahead_extract_base`"""
@@ -385,6 +385,7 @@ def max_overlap(cz_matrix: Mat2) -> Tuple[Tuple[int,int],List[int]]:
 def filter_duplicate_cnots(cnots: List[CNOT]) -> List[CNOT]:
     """Cancels adjacent CNOT gates in a list of CNOT gates."""
     from .optimize import basic_optimization
+    if not cnots: return cnots  # Nothing to do if the list is empty
     qubits = max([max(cnot.control,cnot.target) for cnot in cnots]) + 1
     c = Circuit(qubits)
     c.gates = cnots.copy() # type: ignore
@@ -499,14 +500,14 @@ def clean_frontier(g: BaseGraph[VT, ET], c: Circuit, frontier: List[VT],
         q = qubit_map[v]
         b = [w for w in g.neighbors(v) if w in outputs][0]
         e = g.edge(v, b)
-        if g.edge_type(e) == 2:  # Hadamard edge
+        if g.edge_type(e) == EdgeType.HADAMARD:
             c.add_gate("HAD", q)
-            g.set_edge_type(e, 1)
+            g.set_edge_type(e, EdgeType.SIMPLE)
         if phases[v]:
             c.add_gate("ZPhase", q, phases[v])
             g.set_phase(v, 0)
     # And now on to CZ gates
-    cz_mat = Mat2([[0 for i in range(g.qubit_count())] for j in range(g.qubit_count())])
+    cz_mat = Mat2([[0 for i in range(len(outputs))] for j in range(len(outputs))])
     for v in frontier:
         for w in list(g.neighbors(v)):
             if w in frontier:
@@ -529,8 +530,8 @@ def clean_frontier(g: BaseGraph[VT, ET], c: Circuit, frontier: List[VT],
             c.add_gate("CNOT", i, j)
             overlap_data = max_overlap(cz_mat)
 
-    for i in range(g.qubit_count()):
-        for j in range(i + 1, g.qubit_count()):
+    for i in range(len(outputs)):
+        for j in range(i + 1, len(outputs)):
             if cz_mat.data[i][j] == 1:
                 c.add_gate("CZ", i, j)
 
@@ -558,11 +559,11 @@ def neighbors_of_frontier(g: BaseGraph[VT, ET], frontier: List[VT]) -> Set[VT]:
             b = [w for w in d if w in inputs][0]
             q = qs[b]
             r = rs[b]
-            w = g.add_vertex(1, q, r + 1)
+            w = g.add_vertex(VertexType.Z, q, r + 1)
             e = g.edge(v, b)
             et = g.edge_type(e)
             g.remove_edge(e)
-            g.add_edge(g.edge(v, w), 2)
+            g.add_edge(g.edge(v, w), EdgeType.HADAMARD)
             g.add_edge(g.edge(w, b), toggle_edge(et))
             d.remove(b)
             d.append(w)
@@ -588,36 +589,6 @@ def remove_gadget(g: BaseGraph[VT, ET], frontier: List[VT], qubit_map: Dict[VT, 
                 break
     return removed_gadget
 
-def match_xz_lcomp_parallel(g):
-    candidates = g.vertex_set()
-    types = g.types()
-    phases = g.phases()
-    m = []
-
-    while len(candidates) > 0:
-        v = candidates.pop()
-        vt = types[v]
-        va = phases[v]
-        
-        if vt != VertexType.Z: continue
-        if not (va == Fraction(1,2) or va == Fraction(3,2)): continue
-
-        if not (
-            all(g.edge_type(e) == EdgeType.HADAMARD for e in g.incident_edges(v))
-            ): continue
-                
-        vn = list(g.neighbors(v))
-        match = False
-        for n in vn:
-            if len(g.neighbors(n)) == 1 and g.types()[n] != VertexType.BOUNDARY:
-                match = True
-        
-        if not match: #only phase gadgets! TODO: what if root is connected to boundary?
-            continue
-
-        m.append((v,vn))
-    return m
-
 
 def extract_circuit(
         g: BaseGraph[VT, ET],
@@ -637,25 +608,24 @@ def extract_circuit(
         optimize_cnots: (0,1,2,3) Level of CNOT optimization to apply.
         up_to_perm: If true, returns a circuit that is equivalent to the given graph up to a permutation of the inputs.
         quiet: Whether to print detailed output of the extraction process.
+
+    Warning:
+        Note that this function changes the graph `g` in place. 
+        In particular, if the extraction fails, the modified `g` shows 
+        how far the extraction got. If you want to keep the original `g`
+        then input `g.copy()` into `extract_circuit`.
     """
-    c = Circuit(g.qubit_count())
 
     gadgets = {}
     inputs = g.inputs()
     outputs = g.outputs()
 
-    while True: #remove xz spiders
-        xz_matches = match_xz_lcomp_parallel(g)
-        if len(xz_matches) > 0:
-            apply_rule(g, lcomp, [xz_matches[0]])
-        else:
-            break
+    c = Circuit(len(outputs))
 
     for v in g.vertices():
         if g.vertex_degree(v) == 1 and v not in inputs and v not in outputs:
             n = list(g.neighbors(v))[0]
             gadgets[n] = v
-    
     qubit_map: Dict[VT,int] = dict()
     frontier = []
     for i, o in enumerate(outputs):
@@ -664,7 +634,6 @@ def extract_circuit(
             continue
         frontier.append(v)
         qubit_map[v] = i
-        
     czs_saved = 0
     q: Union[float, int]
     
@@ -747,10 +716,10 @@ def extract_simple(g: BaseGraph[VT, ET], up_to_perm: bool = True) -> Circuit:
         g: The graph to extract
         up_to_perm: If true, returns a circuit that is equivalent to the given graph up to a permutation of the inputs.
     """
-    circ = Circuit(g.qubit_count())
+    
     progress = True
-    # inputs = g.inputs()
     outputs = g.outputs()
+    circ = Circuit(len(outputs))
     while progress:
         progress = False
         
@@ -802,26 +771,29 @@ def extract_simple(g: BaseGraph[VT, ET], up_to_perm: bool = True) -> Circuit:
                     elif g.type(v1) == VertexType.X and g.type(v2) == VertexType.X:
                         # conjugate CZ
                         progress = True
-                        circ.prepend_gate(CX(control=q1,target=q2))
+                        circ.prepend_gate(XCX(control=q1, target=q2))
                         g.remove_edge(g.edge(v1,v2))
 
     return graph_to_swaps(g, up_to_perm) + circ
 
 
 def graph_to_swaps(g: BaseGraph[VT, ET], no_swaps: bool = False) -> Circuit:
-    """Converts a graph containing only normal and Hadamard edges into a circuit of Hadamard
-    and SWAP gates. If 'no_swaps' is True, only add Hadamards where needed"""
-    c = Circuit(g.qubit_count())
+    """Converts a graph containing only normal and Hadamard edges (i.e., no vertices other than
+    inputs and outputs) into a circuit of Hadamard and SWAP gates. If 'no_swaps' is True, only add
+    Hadamards where needed"""
     swap_map = {}
     leftover_swaps = False
     inputs = g.inputs()
     outputs = g.outputs()
+
+    c = Circuit(len(inputs))
+
     for q,v in enumerate(outputs): # check for a last layer of Hadamards, and see if swap gates need to be applied.
         inp = list(g.neighbors(v))[0]
         if inp not in inputs: 
             raise TypeError("Algorithm failed: Graph is not fully reduced")
             return c
-        if g.edge_type(g.edge(v,inp)) == 2:
+        if g.edge_type(g.edge(v,inp)) == EdgeType.HADAMARD:
             c.prepend_gate(HAD(q))
             g.set_edge_type(g.edge(v,inp),EdgeType.SIMPLE)
         q2 = inputs.index(inp)
@@ -830,7 +802,69 @@ def graph_to_swaps(g: BaseGraph[VT, ET], no_swaps: bool = False) -> Circuit:
     if not no_swaps and leftover_swaps:
         for t1, t2 in permutation_as_swaps(swap_map):
             c.prepend_gate(SWAP(t1, t2))
-    #c.gates = list(reversed(c.gates))
+    return c
+
+
+def extract_clifford_normal_form(g: BaseGraph[VT,ET]) -> Circuit:
+    """Given a Clifford graph, extracts a circuit that follows the normal form described in
+    *Graph-theoretic Simplification of Quantum Circuits with the ZX-calculus* (https://arxiv.org/abs/1902.03178).
+    That is, a circuit consisting of layers Had-Phase-CZ-CNOT-Had-CZ-Phase-Had.
+    """
+    # We prepare the circuit in the same way as we do in simplify.to_clifford_normal_form_graph()
+    # To make it foolproof, we process it in the desired way first.
+    full_reduce(g)
+    g.normalize()
+    # At this point the only vertices g should have are those directly connected to an input or an output (and not both).
+    if any([((g.phase(v)*4) % 2 != 0) for v in g.vertices()]):  # If any phase is not a multiple of 1/2, then this will fail.
+        raise ValueError("Specified graph is not Clifford.")
+    
+    inputs = list(g.inputs())
+    outputs = list(g.outputs())
+    v_inputs = [list(g.neighbors(i))[0] for i in inputs] # input vertices should have a unique spider neighbor
+    v_outputs = [list(g.neighbors(o))[0] for o in outputs] # input vertices should have a unique spider neighbor
+
+    if len(inputs) != len(outputs):
+        raise ValueError("Number of input wires does not match number of output wires. Currently only unitary Clifford extraction is supported.")
+    if len(v_inputs) != len(inputs) or len(v_inputs) != len(v_outputs):
+        raise ValueError("Something has gone wrong with simplifying the Clifford diagram to the graph normal form.")
+    
+    c = Circuit(len(inputs))
+
+    for q in range(len(inputs)):
+        if g.edge_type(g.edge(inputs[q],v_inputs[q])) == EdgeType.HADAMARD:
+            c.add_gate(HAD(q))
+
+    for q in range(len(inputs)):
+        phase = g.phase(v_inputs[q])
+        if phase != 0:
+            c.add_gate(ZPhase(q,phase))
+
+    for q1 in range(len(inputs)):
+        for q2 in range(q1+1, len(inputs)):
+            if g.connected(v_inputs[q1],v_inputs[q2]):
+                c.add_gate(CZ(q1,q2))
+
+    adj = bi_adj(g, v_outputs, v_inputs)
+    for cnot in adj.to_cnots(use_log_blocksize=True):
+        c.add_gate(cnot)
+
+    for q in range(len(outputs)):
+        c.add_gate(HAD(q))
+
+    for q1 in range(len(outputs)):
+        for q2 in range(q1+1, len(outputs)):
+            if g.connected(v_outputs[q1],v_outputs[q2]):
+                c.add_gate(CZ(q1,q2))
+
+    for q in range(len(outputs)):
+        phase = g.phase(v_outputs[q])
+        if phase != 0:
+            c.add_gate(ZPhase(q,phase))
+
+    for q in range(len(outputs)):
+        if g.edge_type(g.edge(outputs[q],v_outputs[q])) == EdgeType.HADAMARD:
+            c.add_gate(HAD(q))
+
     return c
 
 
@@ -1270,7 +1304,7 @@ def lookahead_extract_base(
     """
 
     if steps < 1:
-        steps = g.qubit_count() * 3
+        steps = len(g.inputs()) * 3
     if depth_limit < 1:
         depth_limit = -1
     if min_extract < 0:
@@ -1317,7 +1351,7 @@ def lookahead_extract_base(
         qubit_map[v] = i
 
     roots: List[Optional[LookaheadNode]] =\
-        [LookaheadNode(g, Circuit(g.qubit_count()), frontier, qubit_map, gadgets, optimize_for_depth, hard_limit)]
+        [LookaheadNode(g, Circuit(len(inputs)), frontier, qubit_map, gadgets, optimize_for_depth, hard_limit)]
 
     while len(roots) > 0:
         rp = RootPicker(nodes_kept)
@@ -1381,7 +1415,7 @@ def lookahead_fast(g: BaseGraph[VT, ET], optimize_for_depth: bool = False, up_to
     """
     A lookahead extraction with relatively fast results. For details see :func:`lookahead_extract_base`
     """
-    c = lookahead_extract_base(g, 4 * g.qubit_count(), 8, 5, 4, -1, [0, 1], optimize_for_depth, False, up_to_perm)
+    c = lookahead_extract_base(g, 4 * len(g.inputs()), 8, 5, 4, -1, [0, 1], optimize_for_depth, False, up_to_perm)
     if c is None:
         raise AssertionError("Lookahead extraction with no hard limit returned None")
     return c
@@ -1391,7 +1425,7 @@ def lookahead_extract(g: BaseGraph[VT, ET], optimize_for_depth: bool = False, up
     """
         A lookahead extraction with recommended parameters. For details see :func:`lookahead_extract_base`
     """
-    qubits = g.qubit_count()
+    qubits = len(g.inputs())
     c = lookahead_extract_base(g.clone(), 4 * qubits, 8, 0, 4, -1, [0, 1], optimize_for_depth, True, up_to_perm)
     if c is None:
         raise AssertionError("Lookahead extraction with no hard limit returned None")
@@ -1409,7 +1443,7 @@ def lookahead_full(g: BaseGraph[VT, ET], optimize_for_depth: bool = False, up_to
         A lookahead extraction which compares a number of possible extractions and returns the best result.
         Can take a very long time for large circuits. For details see :func:`lookahead_extract_base`
     """
-    qubits = g.qubit_count()
+    qubits = len(g.inputs())
     c = lookahead_extract_base(g.clone(), 3 * qubits, 7, qubits, 4, -1,
                                [0, 1, 3], optimize_for_depth, True, up_to_perm)
     if c is None:

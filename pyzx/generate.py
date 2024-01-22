@@ -14,15 +14,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-__all__ = ['cnots','cliffords', 'cliffordT', 'identity', 'CNOT_HAD_PHASE_circuit']
+__all__ = [
+    "cnots",
+    "cliffords",
+    "cliffordT",
+    "cliffordTmeas",
+    "identity",
+    "CNOT_HAD_PHASE_circuit",
+    "phase_poly",
+    "phase_poly_approximate",
+    "phase_poly_from_gadgets",
+]
 
 import random
 from fractions import Fraction
 
-from typing import Optional, List, Union
+from typing import Optional, List, Set, Union
 from typing_extensions import Literal
 
-from .utils import EdgeType, VertexType, FloatInt, FractionLike
+import numpy as np
+from pyzx.circuit.gates import CNOT, ZPhase
+from pyzx.linalg import Mat2, MatLike
+
+from pyzx.routing.parity_maps import CNOT_tracker, Parity
+from pyzx.routing.phase_poly import PhasePoly, mat22partition
+
+from .utils import EdgeType, VertexType, FloatInt, FractionLike, vertex_is_w, set_z_box_label
 from .graph import Graph
 from .graph.base import BaseGraph
 from .circuit import Circuit
@@ -53,20 +70,38 @@ def identity(qubits: int, depth: FloatInt=1,backend:Optional[str]=None) -> BaseG
     return g
 
 def spider(
-    typ:Union[Literal["Z"],Literal["X"],Literal["H"],VertexType.Type],
+    typ:Union[Literal["Z"], Literal["X"], Literal["H"], Literal["W"], Literal["ZBox"], VertexType.Type],
     inputs: int,
     outputs: int,
-    phase:FractionLike=0
+    phase:Optional[Union[FractionLike, complex]]=None,
     ) -> BaseGraph:
     """Returns a Graph containing a single spider of the specified type 
     and with the specified number of inputs and outputs."""
     if typ == "Z": typ = VertexType.Z
     elif typ == "X": typ = VertexType.X
     elif typ == "H": typ = VertexType.H_BOX
+    elif typ == "W": typ = VertexType.W_OUTPUT
+    elif typ == "ZBox": typ = VertexType.Z_BOX
     else:
-        if not isinstance(typ,int):
+        if not isinstance(typ, int):
             raise TypeError("Wrong type for spider type: " + str(typ))
+    if phase is None:
+        phase = 1 if typ == VertexType.Z_BOX else 0
     g = Graph()
+    if vertex_is_w(typ):
+        if inputs != 1:
+            raise ValueError("Wrong number of inputs for W node: " + str(inputs))
+        v_in = g.add_vertex(VertexType.W_INPUT, (outputs-1)/2, 0.8)
+        v_out = g.add_vertex(VertexType.W_OUTPUT, (outputs-1)/2, 1)
+        g.add_edge(g.edge(v_in, v_out), EdgeType.W_IO)
+    elif typ == VertexType.Z_BOX:
+        v_in = g.add_vertex(typ, (inputs-1)/2, 1)
+        set_z_box_label(g, v_in, phase)
+        v_out = v_in
+    else:
+        assert isinstance(phase, (int, Fraction))
+        v_in = g.add_vertex(typ, (inputs-1)/2, 1, phase)
+        v_out = v_in
     inp = []
     outp = []
     for i in range(inputs):
@@ -75,11 +110,10 @@ def spider(
     for i in range(outputs):
         v = g.add_vertex(VertexType.BOUNDARY,i,2)
         outp.append(v)
-    v = g.add_vertex(typ,(inputs-1)/2,1,phase)
     for w in inp:
-        g.add_edge(g.edge(v,w))
+        g.add_edge(g.edge(v_in, w))
     for w in outp:
-        g.add_edge(g.edge(v,w))
+        g.add_edge(g.edge(v_out, w))
 
     g.set_inputs(tuple(inp))
     g.set_outputs(tuple(outp))
@@ -88,13 +122,13 @@ def spider(
 
 
 def CNOT_HAD_PHASE_circuit(
-        qubits: int, 
-        depth: int, 
-        p_had: float = 0.2, 
-        p_t: float = 0.2, 
+        qubits: int,
+        depth: int,
+        p_had: float = 0.2,
+        p_t: float = 0.2,
         clifford:bool=False
         ) -> Circuit:
-    """Construct a Circuit consisting of CNOT, HAD and phase gates. 
+    """Construct a Circuit consisting of CNOT, HAD and phase gates.
     The default phase gate is the T gate, but if ``clifford=True``\ , then
     this is replaced by the S gate.
 
@@ -216,19 +250,20 @@ def random_phase(add_t: bool) -> Fraction:
         return Fraction(random.randint(1,8),4)
     return Fraction(random.randint(1,4),2)
 
-def cliffordT(
+def cliffordTmeas(
         qubits: int, 
         depth: int, 
         p_t:Optional[float]=None, 
         p_s:Optional[float]=None, 
         p_hsh:Optional[float]=None, 
         p_cnot:Optional[float]=None, 
+        p_meas:Optional[float]=None, 
         backend:Optional[str]=None
         ) -> BaseGraph:
     """Generates a circuit consisting of randomly placed Clifford+T gates. Optionally, take
-    probabilities of adding T, S, HSH, and CNOT. If probabilities for only a subset of gates
-    is given, any remaining probability will be uniformly distributed among the remaining
-    gates.
+    probabilities of adding T, S, HSH, CNOT, and measurements.
+    If probabilities for only a subset of gates is given, any remaining probability will be
+    uniformly distributed among the remaining gates.
 
     :param qubits: Amount of qubits in circuit.
     :param depth: Depth of circuit.
@@ -236,6 +271,7 @@ def cliffordT(
     :param p_s: Probability that each gate is a S-gate.
     :param p_hsh: Probability that each gate is a HSH-gate.
     :param p_cnot: Probability that each gate is a CNOT-gate.
+    :param p_meas: Probability that each gate is a measurement.
     :param backend: When given, should be one of the possible :ref:`graph_api` backends.
     :rtype: Instance of graph of the given backend.
     """
@@ -254,6 +290,8 @@ def cliffordT(
     else: rest -= p_hsh
     if p_cnot is None: num += 1.0
     else: rest -= p_cnot
+    if p_meas is None: num += 1.0
+    else: rest -= p_meas
 
     if rest < 0: raise ValueError("Probabilities are >1.")
 
@@ -261,6 +299,7 @@ def cliffordT(
     if p_s is None: p_s = rest / num
     if p_hsh is None: p_hsh = rest / num
     if p_cnot is None: p_cnot = rest / num
+    if p_meas is None: p_meas = rest / num
 
     #p_s = (1 - p_t) / 3.0
     #p_hsh = (1 - p_t) / 3.0
@@ -310,6 +349,9 @@ def cliffordT(
         elif p > 1 - p_cnot - p_hsh - p_s:
             # apply S gate
             g.set_phase(v-1, Fraction(1,2))
+        elif p > 1 - p_cnot - p_hsh - p_s - p_meas:
+            # apply a measurement
+            g.set_ground(v-1)
         else:
             # apply T gate
             g.set_phase(v-1, Fraction(1,4))
@@ -332,7 +374,30 @@ def cliffordT(
 
     return g
 
+def cliffordT(
+        qubits: int,
+        depth: int,
+        p_t:Optional[float]=None,
+        p_s:Optional[float]=None,
+        p_hsh:Optional[float]=None,
+        p_cnot:Optional[float]=None,
+        backend:Optional[str]=None
+        ) -> BaseGraph:
+    """Generates a circuit consisting of randomly placed Clifford+T gates. Optionally, take
+    probabilities of adding T, S, HSH, and CNOT. If probabilities for only a subset of gates
+    is given, any remaining probability will be uniformly distributed among the remaining
+    gates.
 
+    :param qubits: Amount of qubits in circuit.
+    :param depth: Depth of circuit.
+    :param p_t: Probability that each gate is a T-gate.
+    :param p_s: Probability that each gate is a S-gate.
+    :param p_hsh: Probability that each gate is a HSH-gate.
+    :param p_cnot: Probability that each gate is a CNOT-gate.
+    :param backend: When given, should be one of the possible :ref:`graph_api` backends.
+    :rtype: Instance of graph of the given backend.
+    """
+    return cliffordTmeas(qubits, depth, p_t, p_s, p_hsh, p_cnot, 0, backend)
 
 def cliffords(
         qubits: int, 
@@ -534,3 +599,108 @@ def circuit_identity_two_qubit2() -> Circuit:
     c.add_gate("T",1,adjoint=True)
     c.add_circuit(c)
     return c
+
+
+
+def phase_poly(n_qubits: int, n_phase_layers: int, cnots_per_layer: int) -> Circuit:
+    """
+    Create a random phase polynomial circuit.
+
+    :param n_qubits: Number of qubits in the circuit.
+    :param n_phase_layers: Number of layers of phase gates.
+    :param cnots_per_layer: Number of CNOTs in each layer.
+    :return: A random phase polynomial circuit.
+    """
+    c = CNOT_tracker(n_qubits)
+    for _ in range(n_phase_layers):
+        build_random_parity_map(n_qubits, cnots_per_layer, circuit=c)
+        for i in range(n_qubits):
+            phase = Fraction(
+                np.random.choice([1, -1]), int(np.random.choice([1, 2, 4]))
+            )
+            c.add_gate(ZPhase(target=i, phase=phase))
+    return c
+
+
+def phase_poly_approximate(n_qubits: int, n_CNOTs: int, n_phases: int) -> Circuit:
+    """
+    Create a random phase polynomial circuit with an exact number of CNOT gates.
+
+    :param n_qubits: Number of qubits in the circuit.
+    :param n_CNOTs: Number of CNOTs in the circuit.
+    :param n_phases: Target of phase gates in the circuit. The actual number of phase gates may be slightly different.
+    :return: A random phase polynomial circuit.
+    """
+    c = CNOT_tracker(n_qubits)
+    cnot_count = 0
+    p = n_phases / (n_CNOTs + n_phases)
+    while cnot_count < n_CNOTs:
+        target = np.random.randint(n_qubits)
+        if np.random.rand() < p:
+            phase = np.random.choice([1, -1]) * Fraction(
+                1, int(np.random.choice([1, 2, 4]))
+            )
+            c.add_gate(ZPhase(target=target, phase=phase))
+        else:
+            control = np.random.choice([i for i in range(n_qubits) if i != target])
+            c.add_gate(CNOT(control, target))
+            cnot_count += 1
+    return c
+
+
+def phase_poly_from_gadgets(n_qubits: int, n_gadgets: int) -> Circuit:
+    """
+    Create a random phase polynomial circuit from a set of phase gadgets.
+
+    :param n_qubits: Number of qubits in the circuit.
+    :param n_gadgets: Number of phase gadgets to generate.
+    :return: A random phase polynomial circuit.
+    """
+    parities: Set[Parity] = set()
+    if n_gadgets > 2**n_qubits:
+        n_gadgets = n_qubits ^ 3
+    if n_qubits < 26:
+        for integer in np.random.choice(
+            2**n_qubits - 1, replace=False, size=n_gadgets
+        ):
+            parities.add(Parity(integer + 1, n_qubits))
+    elif n_qubits < 64:
+        while len(parities) < n_gadgets:
+            parities.add(Parity(np.random.randint(1, 2**n_qubits), n_qubits))
+    else:
+        while len(parities) < n_gadgets:
+            par: Parity = Parity([])
+            while not par.count():
+                par = Parity(
+                    np.random.choice([False, True], n_qubits, replace=True), n_qubits
+                )
+            parities.add(par)
+    zphase_dict = {p: Fraction(1, 4) for p in parities}
+    out_parities = mat22partition(Mat2.id(n_qubits))
+    phase_poly = PhasePoly(zphase_dict, out_parities)
+    return phase_poly.rec_gray_synth("gauss", architecture=None)[0]
+
+
+def build_random_parity_map(qubits: int, n_cnots: int, circuit=None) -> MatLike:
+    """
+    Builds a random parity map.
+
+    :param qubits: The number of qubits that participate in the parity map
+    :param n_cnots: The number of CNOTs in the parity map
+    :param circuit: A (list of) circuit object(s) that implements a row_add() method to add the generated CNOT gates [optional]
+    :return: a 2D numpy array that represents the parity map.
+    """
+    if circuit is None:
+        circuit = []
+    if not isinstance(circuit, list):
+        circuit = [circuit]
+    g = cnots(qubits=qubits, depth=n_cnots)
+    c = Circuit.from_graph(g)
+    matrix = Mat2.id(qubits)
+    for gate in c.gates:
+        if not hasattr(gate, "control") or not hasattr(gate, "target"):
+            continue
+        matrix.row_add(gate.control, gate.target)
+        for c in circuit:
+            c.row_add(gate.control, gate.target)
+    return matrix.data

@@ -24,7 +24,7 @@ from typing_extensions import Literal, GenericMeta # type: ignore # https://gith
 
 import numpy as np
 
-from ..utils import EdgeType, VertexType, toggle_edge, vertex_is_zx, toggle_vertex
+from ..utils import EdgeType, VertexType, get_z_box_label, set_z_box_label, toggle_edge, vertex_is_z_like, vertex_is_zx, toggle_vertex, vertex_is_w, get_w_partner, vertex_is_zx_like
 from ..utils import FloatInt, FractionLike
 from ..tensor import tensorfy, tensor_to_matrix
 
@@ -70,7 +70,7 @@ ET = TypeVar('ET') # The type used for representing edges (e.g. a pair of intege
 class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
     """Base class for letting graph backends interact with PyZX.
     For a backend to work with PyZX, there should be a class that implements
-    all the methods of this class. For implementations of this class see 
+    all the methods of this class. For implementations of this class see
     :class:`~pyzx.graph.graph_s.GraphS` or :class:`~pyzx.graph.graph_ig.GraphIG`."""
 
     backend: ClassVar[str] = 'None'
@@ -85,10 +85,12 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         self.phase_master: Optional['simplify.Simplifier'] = None
         self.phase_mult: Dict[int,Literal[1,-1]] = dict()
         self.max_phase_index: int = -1
+        self._vdata: Dict[VT,Dict[str,Any]] = dict()
 
         # merge_vdata(v0,v1) is an optional, custom function for merging
         # vdata of v1 into v0 during spider fusion etc.
         self.merge_vdata: Optional[Callable[[VT,VT], None]] = None
+        self.variable_types: Dict[str,bool] = dict() # mapping of variable names to their type (bool or continuous)
 
     def __str__(self) -> str:
         return "Graph({} vertices, {} edges)".format(
@@ -114,9 +116,9 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         return s
 
     def copy(self, adjoint:bool=False, backend:Optional[str]=None) -> 'BaseGraph':
-        """Create a copy of the graph. If ``adjoint`` is set, 
+        """Create a copy of the graph. If ``adjoint`` is set,
         the adjoint of the graph will be returned (inputs and outputs flipped, phases reversed).
-        When ``backend`` is set, a copy of the graph with the given backend is produced. 
+        When ``backend`` is set, a copy of the graph with the given backend is produced.
         By default the copy will have the same backend.
 
         Args:
@@ -150,12 +152,14 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         for v in self.vertices():
             i = g.add_vertex(ty[v],phase=mult*ph[v])
             if v in qs: g.set_qubit(i,qs[v])
-            if v in rs: 
+            if v in rs:
                 if adjoint: g.set_row(i, maxr-rs[v])
                 else: g.set_row(i, rs[v])
             vtab[v] = i
             for k in self.vdata_keys(v):
                 g.set_vdata(i, k, self.vdata(v, k))
+        for v in self.grounds():
+            g.set_ground(vtab[v], True)
 
         new_inputs = tuple(vtab[i] for i in self.inputs())
         new_outputs = tuple(vtab[i] for i in self.outputs())
@@ -165,7 +169,6 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         else:
             g.set_inputs(new_outputs)
             g.set_outputs(new_inputs)
-        
         etab = {e:g.edge(vtab[self.edge_s(e)],vtab[self.edge_t(e)]) for e in self.edges()}
         g.add_edges(etab.values())
         for e,f in etab.items():
@@ -179,6 +182,8 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
     def clone(self) -> 'BaseGraph':
         """
         This method should return an identical copy of the graph, without any relabeling
+
+        FIXME: this currently *does* change lables.
 
         Used in lookahead extraction.
         """
@@ -200,7 +205,7 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
     def replace_subgraph(self, left_row: FloatInt, right_row: FloatInt, replace: 'BaseGraph') -> None:
         """Deletes the subgraph of all nodes with rank strictly between ``left_row``
         and ``right_row`` and replaces it with the graph ``replace``.
-        The amount of nodes on the left row should match the amount of inputs of 
+        The amount of nodes on the left row should match the amount of inputs of
         the replacement graph and the same for the right row and the outputs.
         The graphs are glued together based on the qubit index of the vertices."""
         qleft = [v for v in self.vertices() if self.row(v)==left_row]
@@ -215,7 +220,6 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
             raise TypeError("Input qubit indices do not match")
         if set(self.qubit(v) for v in qright)!= set(replace.qubit(v) for v in r_outputs):
             raise TypeError("Output qubit indices do not match")
-        
         self.remove_vertices([v for v in self.vertices() if (left_row < self.row(v) and self.row(v) < right_row)])
         self.remove_edges([self.edge(s,t) for s in qleft for t in qright if self.connected(s,t)])
         rdepth = replace.depth() -1
@@ -225,8 +229,11 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         vtab = {}
         for v in replace.vertices():
             if v in r_inputs or v in r_outputs: continue
-            vtab[v] = self.add_vertex(replace.type(v),replace.qubit(v),
-                                replace.row(v)+left_row,replace.phase(v))
+            vtab[v] = self.add_vertex(replace.type(v),
+                                      replace.qubit(v),
+                                      replace.row(v)+left_row,
+                                      replace.phase(v),
+                                      replace.is_ground(v))
         for v in r_inputs:
             vtab[v] = [i for i in qleft if self.qubit(i) == replace.qubit(v)][0]
 
@@ -241,11 +248,11 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
     def compose(self, other: 'BaseGraph') -> None:
         """Inserts a graph after this one. The amount of qubits of the graphs must match.
         Also available by the operator `graph1 + graph2`"""
+        other = other.copy()
         outputs = self.outputs()
         inputs = other.inputs()
         if len(outputs) != len(inputs):
             raise TypeError("Outputs of first graph must match inputs of second.")
-        other = other.copy()
 
         plugs: List[Tuple[VT,VT,EdgeType.Type]] = []
         for k in range(len(outputs)):
@@ -274,10 +281,13 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         vtab : Dict[VT,VT] = dict()
         for v in other.vertices():
             if not v in inputs:
-                vtab[v] = self.add_vertex(other.type(v),
+                w = self.add_vertex(other.type(v),
                         phase=other.phase(v),
                         qubit=other.qubit(v),
-                        row=offset + other.row(v))
+                        row=offset + other.row(v),
+                        ground=other.is_ground(v))
+                if v in other._vdata: self._vdata[w] = other._vdata[v]
+                vtab[v] = w
         for e in other.edges():
             s,t = other.edge_st(e)
             if not s in inputs and not t in inputs:
@@ -286,7 +296,6 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
 
         for (no,ni,et) in plugs:
             self.add_edge_smart(self.edge(no,vtab[ni]), edgetype=et)
-
         self.set_outputs(tuple(vtab[v] for v in other.outputs()))
 
 
@@ -301,9 +310,11 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         height = max((self.qubits().values()), default=0) + 1
         rs = other.rows()
         phases = other.phases()
+        vdata = other._vdata
         vertex_map = dict()
         for v in other.vertices():
-            w = g.add_vertex(ts[v],qs[v]+height,rs[v],phases[v])
+            w = g.add_vertex(ts[v],qs[v]+height,rs[v],phases[v],g.is_ground(v))
+            if v in vdata: g._vdata[w] = vdata[v]
             vertex_map[v] = w
         for e in other.edges():
             s,t = other.edge_st(e)
@@ -344,17 +355,18 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
 
     def merge(self, other: 'BaseGraph') -> Tuple[List[VT],List[ET]]:
         """Merges this graph with the other graph in-place.
-        Returns (list-of-vertices, list-of-edges) corresponding to 
+        Returns (list-of-vertices, list-of-edges) corresponding to
         the id's of the vertices and edges of the other graph."""
         ty = other.types()
         rs = other.rows()
         qs = other.qubits()
         phase = other.phases()
+        grounds = other.grounds()
 
         vert_map = dict()
         edges = []
         for v in other.vertices():
-            w = self.add_vertex(ty[v],qs[v],rs[v],phase[v])
+            w = self.add_vertex(ty[v],qs[v],rs[v],phase[v],v in grounds)
             vert_map[v] = w
         for e in other.edges():
             s,t = other.edge_st(e)
@@ -371,12 +383,13 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         rs = self.rows()
         qs = self.qubits()
         phase = self.phases()
+        grounds = self.grounds()
 
         edges = [self.edge(v,w) for v in verts for w in verts if self.connected(v,w)]
 
         vert_map = dict()
         for v in verts:
-            w = g.add_vertex(ty[v],qs[v],rs[v],phase[v])
+            w = g.add_vertex(ty[v],qs[v],rs[v],phase[v],v in grounds)
             vert_map[v] = w
         for e in edges:
             s,t = self.edge_st(e)
@@ -395,7 +408,7 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         new_inputs = []
         for i,s in enumerate(state):
             v = inputs[i]
-            if s == '/': 
+            if s == '/':
                 new_inputs.append(v)
                 continue
             if s in ('0', '1'):
@@ -464,15 +477,15 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
 
     @classmethod
     def from_json(cls, js) -> 'BaseGraph':
-        """Converts the given .qgraph json string into a Graph. 
+        """Converts the given .qgraph json string into a Graph.
         Works with the output of :meth:`to_json`."""
         from .jsonparser import json_to_graph
         return json_to_graph(js,cls.backend)
 
     @classmethod
     def from_tikz(cls, tikz: str, warn_overlap:bool= True, fuse_overlap:bool = True, ignore_nonzx:bool = False) -> 'BaseGraph':
-        """Converts a tikz diagram into a pyzx Graph. 
-    The tikz diagram is assumed to be one generated by Tikzit, 
+        """Converts a tikz diagram into a pyzx Graph.
+    The tikz diagram is assumed to be one generated by Tikzit,
     and hence should have a nodelayer and a edgelayer..
 
     Args:
@@ -488,7 +501,6 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         from ..tikz import tikz_to_graph
         return tikz_to_graph(tikz,warn_overlap, fuse_overlap, ignore_nonzx, cls.backend)
 
-    
 
     def is_id(self) -> bool:
         """Returns whether the graph is just a set of identity wires,
@@ -529,9 +541,9 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
     def auto_detect_io(self):
         """Adds every vertex that is of boundary-type to the list of inputs or outputs.
         Whether it is an input or output is determined by looking whether its neighbor
-        is further to the right or further to the left of the input. 
+        is further to the right or further to the left of the input.
         Inputs and outputs are sorted by vertical position.
-        Raises an exception if boundary vertex does not have a unique neighbor 
+        Raises an exception if boundary vertex does not have a unique neighbor
         or if this neighbor is on the same horizontal position.
         """
         ty = self.types()
@@ -559,7 +571,7 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         if self.num_inputs() == 0:
             self.auto_detect_io()
         max_r = self.depth() - 1
-        if max_r <= 2: 
+        if max_r <= 2:
             for o in self.outputs():
                 self.set_row(o,4)
             max_r = self.depth() -1
@@ -635,11 +647,12 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         new vertices added to the graph, namely: range(g.vindex() - amount, g.vindex())"""
         raise NotImplementedError("Not implemented on backend " + type(self).backend)
 
-    def add_vertex(self, 
-                   ty:VertexType.Type=VertexType.BOUNDARY, 
-                   qubit:FloatInt=-1, 
-                   row:FloatInt=-1, 
-                   phase:Optional[FractionLike]=None
+    def add_vertex(self,
+                   ty:VertexType.Type=VertexType.BOUNDARY,
+                   qubit:FloatInt=-1,
+                   row:FloatInt=-1,
+                   phase:Optional[FractionLike]=None,
+                   ground:bool=False
                    ) -> VT:
         """Add a single vertex to the graph and return its index.
         The optional parameters allow you to respectively set
@@ -651,13 +664,22 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
             else: phase = 0
         self.set_qubit(v, qubit)
         self.set_row(v, row)
-        if phase: 
+        if phase:
             self.set_phase(v, phase)
+        if ground:
+            self.set_ground(v, True)
         if self.track_phases:
             self.max_phase_index += 1
             self.phase_index[v] = self.max_phase_index
             self.phase_mult[self.max_phase_index] = 1
         return v
+
+    def add_vertex_indexed(self,v:VT) -> None:
+        """Adds a vertex that is guaranteed to have the chosen index (i.e. 'name').
+        If the index isn't available, raises a ValueError.
+        This method is used in the editor and ZXLive to support undo,
+        which requires vertices to preserve their index."""
+        raise NotImplementedError("Not implemented on backend " + type(self).backend)
 
     def add_edges(self, edges: Iterable[ET], edgetype:EdgeType.Type=EdgeType.SIMPLE) -> None:
         """Adds a list of edges to the graph."""
@@ -670,7 +692,7 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
     def add_edge_table(self, etab:Mapping[ET,List[int]]) -> None:
         """Takes a dictionary mapping (source,target) --> (#edges, #h-edges) specifying that
         #edges regular edges must be added between source and target and $h-edges Hadamard edges.
-        The method selectively adds or removes edges to produce that ZX diagram which would 
+        The method selectively adds or removes edges to produce that ZX diagram which would
         result from adding (#edges, #h-edges), and then removing all parallel edges using Hopf/spider laws."""
         add: Dict[EdgeType.Type,List[ET]] = {EdgeType.SIMPLE: [], EdgeType.HADAMARD: []} # list of edges and h-edges to add
         new_type: Optional[EdgeType.Type]
@@ -687,27 +709,42 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
                 if n1 == 1: new_type = EdgeType.SIMPLE
                 elif n2 == 1: new_type = EdgeType.HADAMARD
                 else: new_type = None
+                # self loops are allowed for W nodes. this is a hack to add self-loops using id Z spiders
+                if new_type and vertex_is_w(t1) and vertex_is_w(t2) and \
+                    (v1 == v2 or v1 == get_w_partner(self, v2)):
+                    id_1 = self.add_vertex(VertexType.Z, self.qubit(v1) + 1, self.row(v1) - 0.5)
+                    id_2 = self.add_vertex(VertexType.Z, self.qubit(v2) + 1, self.row(v2) + 0.5)
+                    add[EdgeType.SIMPLE].extend([self.edge(v1, id_1), self.edge(v2, id_2)])
+                    add[new_type].append(self.edge(id_1, id_2))
+                    continue
             # Hence, all the other cases have some kind of parallel edge
             elif t1 == VertexType.BOUNDARY or t2 == VertexType.BOUNDARY:
                 raise ValueError("Parallel edges to a boundary edge are not supported")
-            elif t1 == t2 and vertex_is_zx(t1): #types are ZX & equal,
+            elif (t1 == t2 and vertex_is_zx(t1)) or \
+                (vertex_is_z_like(t1) and vertex_is_z_like(t2)): #types are ZX & equal,
                 n1 = bool(n1)            #so normal edges fuse
                 pairs, n2 = divmod(n2,2) #while hadamard edges go modulo 2
                 self.scalar.add_power(-2*pairs)
                 if n1 != 0 and n2 != 0:  #reduction rule for when both edges appear
                     new_type = EdgeType.SIMPLE
-                    self.add_to_phase(v1, 1)
+                    if t1 == VertexType.Z_BOX:
+                        set_z_box_label(self, v1, get_z_box_label(self, v1) * -1)
+                    else:
+                        self.add_to_phase(v1, 1)
                     self.scalar.add_power(-1)
                 elif n1 != 0: new_type = EdgeType.SIMPLE
                 elif n2 != 0: new_type = EdgeType.HADAMARD
                 else: new_type = None
-            elif t1 != t2 and vertex_is_zx(t1) and vertex_is_zx(t2): #types are ZX & different
+            elif t1 != t2 and vertex_is_zx_like(t1) and vertex_is_zx_like(t2): #types are ZX & different
                 pairs, n1 = divmod(n1,2) #so normal edges go modulo 2
                 n2 = bool(n2)            #while hadamard edges fuse
                 self.scalar.add_power(-2*pairs)
                 if n1 != 0 and n2 != 0:  #reduction rule for when both edges appear
                     new_type = EdgeType.HADAMARD
-                    self.add_to_phase(v1, 1)
+                    if t1 == VertexType.Z_BOX:
+                        set_z_box_label(self, v1, get_z_box_label(self, v1) * -1)
+                    else:
+                        self.add_to_phase(v1, 1)
                     self.scalar.add_power(-1)
                 elif n1 != 0: new_type = EdgeType.SIMPLE
                 elif n2 != 0: new_type = EdgeType.HADAMARD
@@ -722,9 +759,6 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
                 elif t2 == VertexType.Z: # Z & H-box
                     n1 = bool(n1) # parallel regular edges collapse to single wire
                     if n2 > 1: raise ValueError("Parallel H-edges between H-box and Z-spider are not supported")
-                    #if n2 and (n2-1) % 2 == 1: # parallel H-edges also collapse, but each extra one adds a pi phase
-                    #    self.add_to_phase(v2, 1)
-                    #n2 = bool(n2)
                     if n1 and n2:
                         # There is no simple way to deal with a parallel H-edge and regular edge
                         # So we simply add a 2-ary H-box to the graph
@@ -733,15 +767,13 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
                         w = self.add_vertex(VertexType.H_BOX,(q1+q2)/2,(r1+r2)/2-0.5)
                         add[EdgeType.SIMPLE].extend([self.edge(v1,w),self.edge(v2,w)])
                         new_type = EdgeType.SIMPLE
+                        self.scalar.add_power(-1)  # H-boxes are scaled differently than H-edges, so we compensate with 1/sqrt(2) here.
                     elif n1: new_type = EdgeType.SIMPLE
                     elif n2: new_type = EdgeType.HADAMARD
                     else: new_type = None
-                elif t2 == VertexType.X: # X & H-box
-                    n2 = bool(n2) # parallel H-edges collapse to single wire
+                elif t2 == VertexType.X:  # X & H-box
+                    n2 = bool(n2)  # parallel H-edges collapse to single wire
                     if n1 > 1: raise ValueError("Parallel edges between H-box and X-spider are not supported")
-                    #if (n1-1) % 2 == 1: # parallel regular edges also collapse, but each extra one adds a pi phase
-                    #    self.add_to_phase(v2, 1)
-                    #n1 = bool(n1)
                     if n1 and n2:
                         # There is no simple way to deal with a parallel H-edge and regular edge
                         # So we simply add a 2-ary H-box to the graph
@@ -750,11 +782,27 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
                         w = self.add_vertex(VertexType.H_BOX,(q1+q2)/2,(r1+r2)/2-0.5)
                         add[EdgeType.SIMPLE].extend([self.edge(v1,w),self.edge(v2,w)])
                         new_type = EdgeType.SIMPLE
+                        self.scalar.add_power(-1)  # H-boxes are scaled differently than H-edges, so we compensate with 1/sqrt(2) here.
                     elif n1: new_type = EdgeType.SIMPLE
                     elif n2: new_type = EdgeType.HADAMARD
                     else: new_type = None
                 else:
                     raise ValueError("Unhandled parallel edges between nodes of type (%s,%s)" % (t1,t2))
+            elif t1 == VertexType.W_OUTPUT or t2 == VertexType.W_OUTPUT:
+                # Since we don't yet support parallel edges, we simply add identity Z spiders to hack a parallel edge
+                r1,r2 = self.row(v1), self.row(v2)
+                q1,q2 = self.qubit(v1), self.qubit(v2)
+                id_1 = self.add_vertex(VertexType.Z, (q1 + q2) / 2 - 0.2, (r1 + r2) / 2 - 0.2)
+                id_2 = self.add_vertex(VertexType.Z, (q1 + q2) / 2 + 0.2, (r1 + r2) / 2 + 0.2)
+                add[EdgeType.SIMPLE].extend([self.edge(v1, id_1), self.edge(v1, id_2)])
+                if n1 > 1:
+                    add[EdgeType.SIMPLE].extend([self.edge(id_1, v2), self.edge(id_2, v2)])
+                elif n2 > 2:
+                    add[EdgeType.HADAMARD].extend([self.edge(id_1, v2), self.edge(id_2, v2)])
+                else:
+                    add[EdgeType.SIMPLE].append(self.edge(id_1, v2))
+                    add[EdgeType.HADAMARD].append(self.edge(id_2, v2))
+                new_type = None
             else:
                 raise ValueError("Unhandled parallel edges between nodes of type (%s,%s)" % (t1,t2))
 
@@ -789,9 +837,9 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         self.phase_index[new] = i
 
     def fuse_phases(self, p1: VT, p2: VT) -> None:
-        if p1 not in self.phase_index or p2 not in self.phase_index: 
+        if p1 not in self.phase_index or p2 not in self.phase_index:
             return
-        if self.phase_master is not None: 
+        if self.phase_master is not None:
             self.phase_master.fuse_phases(self.phase_index[p1],self.phase_index[p2])
         self.phase_index[p2] = self.phase_index[p1]
 
@@ -801,7 +849,7 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         mult = self.phase_mult[index]
         if mult == 1: self.phase_mult[index] = -1
         else: self.phase_mult[index] = 1
-        #self.phase_mult[index] = -1*mult 
+        #self.phase_mult[index] = -1*mult
 
     def vertex_from_phase_index(self, i: int) -> VT:
         return list(self.phase_index.keys())[list(self.phase_index.values()).index(i)]
@@ -879,12 +927,12 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         raise NotImplementedError("Not implemented on backend " + type(self).backend)
 
     def vertex_set(self) -> Set[VT]:
-        """Returns the vertices of the graph as a Python set. 
+        """Returns the vertices of the graph as a Python set.
         Should be overloaded if the backend supplies a cheaper version than this."""
         return set(self.vertices())
 
     def edge_set(self) -> Set[ET]:
-        """Returns the edges of the graph as a Python set. 
+        """Returns the edges of the graph as a Python set.
         Should be overloaded if the backend supplies a cheaper version than this."""
         return set(self.edges())
 
@@ -938,7 +986,6 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
     def set_type(self, vertex: VT, t: VertexType.Type) -> None:
         """Sets the type of the given vertex to t."""
         raise NotImplementedError("Not implemented on backend" + type(self).backend)
-    
     def phase(self, vertex: VT) -> FractionLike:
         """Returns the phase value of the given vertex."""
         raise NotImplementedError("Not implemented on backend" + type(self).backend)
@@ -953,7 +1000,7 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         self.set_phase(vertex,self.phase(vertex)+phase)
 
     def qubit(self, vertex: VT) -> FloatInt:
-        """Returns the qubit index associated to the vertex. 
+        """Returns the qubit index associated to the vertex.
         If no index has been set, returns -1."""
         raise NotImplementedError("Not implemented on backend" + type(self).backend)
     def qubits(self) -> Mapping[VT,FloatInt]:
@@ -964,7 +1011,7 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
         raise NotImplementedError("Not implemented on backend" + type(self).backend)
 
     def row(self, vertex: VT) -> FloatInt:
-        """Returns the row that the vertex is positioned at. 
+        """Returns the row that the vertex is positioned at.
         If no row has been set, returns -1."""
         raise NotImplementedError("Not implemented on backend" + type(self).backend)
     def rows(self) -> Mapping[VT, FloatInt]:
@@ -973,6 +1020,20 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
     def set_row(self, vertex: VT, r: FloatInt) -> None:
         """Sets the row the vertex should be positioned at."""
         raise NotImplementedError("Not implemented on backend" + type(self).backend)
+
+    def is_ground(self, vertex: VT) -> bool:
+        """Returns a boolean indicating if the vertex is connected to a ground."""
+        raise NotImplementedError("Not implemented on backend" + type(self).backend)
+    def grounds(self) -> Set[VT]:
+        """Returns the set of vertices connected to a ground."""
+        raise NotImplementedError("Not implemented on backend" + type(self).backend)
+    def set_ground(self, vertex: VT, flag: bool=True) -> None:
+        """Connect or disconnect the vertex to a ground."""
+        raise NotImplementedError("Not implemented on backend" + type(self).backend)
+    def is_hybrid(self) -> bool:
+        """Returns whether this is a hybrid quantum-classical graph,
+        i.e. a graph with ground generators."""
+        return bool(self.grounds())
 
     def set_position(self, vertex: VT, q: FloatInt, r: FloatInt):
         """Set both the qubit index and row index of the vertex."""
@@ -990,3 +1051,21 @@ class BaseGraph(Generic[VT, ET], metaclass=DocstringMeta):
     def set_vdata(self, vertex: VT, key: str, val: Any) -> None:
         """Sets the vertex data associated to key to val."""
         raise NotImplementedError("Not implemented on backend" + type(self).backend)
+
+    def is_well_formed(self) -> bool:
+        """Returns whether the graph is a well-formed ZX-diagram.
+        This means that it has no isolated boundary vertices,
+        each boundary vertex has a unique neighbor,
+        W_input vertices have two neighbors: W_output and other,
+        and W_output vertices have at least two neighbors: W_input and other."""
+        for v in self.vertices():
+            if self.type(v) == VertexType.BOUNDARY:
+                if self.vertex_degree(v) != 1:
+                    return False
+            elif self.type(v) == VertexType.W_INPUT:
+                if self.vertex_degree(v) != 2:
+                    return False
+            elif self.type(v) == VertexType.W_OUTPUT:
+                if self.vertex_degree(v) < 2:
+                    return False
+        return True

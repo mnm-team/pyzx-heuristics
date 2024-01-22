@@ -1,4 +1,4 @@
-# PyZX - Python library for quantum circuit rewriting 
+# PyZX - Python library for quantum circuit rewriting
 #        and optimization using the ZX-calculus
 # Copyright (C) 2018 - Aleks Kissinger and John van de Wetering
 
@@ -18,13 +18,17 @@
 import unittest
 import random
 import sys
+import os
 if __name__ == '__main__':
     sys.path.append('..')
     sys.path.append('.')
 
+mydir = os.path.dirname(__file__)
+
 try:
     import numpy as np
     from pyzx.tensor import tensorfy, compare_tensors
+    import math
 except ImportError:
     np = None
 
@@ -68,6 +72,12 @@ class TestCircuit(unittest.TestCase):
         c2 = Circuit.from_quipper(s)
         self.assertEqual(self.c.qubits, c2.qubits)
         self.assertListEqual(self.c.gates,c2.gates)
+
+    def test_load_quipper_from_file(self):
+        c1 = Circuit.from_quipper_file(os.path.join(mydir,"test_circuit.circuit"))
+        c2 = Circuit.from_quipper_file(os.path.join(mydir,"test_circuit_nocontrol_noqubits.circuit"))
+        self.assertEqual(c1.qubits, c2.qubits)
+        self.assertListEqual(c2.gates,c2.gates)
 
     def test_cliffordT_preserves_graph_semantics(self):
         random.seed(SEED)

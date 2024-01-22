@@ -15,7 +15,7 @@
 # limitations under the License.
 
 __all__ = ['draw', 'arrange_scalar_diagram', 'draw_matplotlib', 'draw_d3', 
-            'matrix_to_latex', 'print_matrix']
+            'matrix_to_latex', 'print_matrix', 'graphs_to_gif']
 
 import os
 import math
@@ -23,24 +23,26 @@ import cmath
 import json
 import string
 import random
+import importlib
 from fractions import Fraction
 from typing import Dict, List, Tuple, Optional, Union, Iterable, Any, TYPE_CHECKING
 from typing_extensions import Literal
 import numpy as np
 
-try:
-    import matplotlib.pyplot as plt
-    from matplotlib import patches, lines, path
-except:
-    plt = None
+# matplotlib is lazy-imported on the first call to draw_matplotlib
+plt = None
+path = None
+patches = None
+lines = None
 
-from .utils import settings, phase_to_s, EdgeType, VertexType, FloatInt
+
+from .utils import settings, get_mode, phase_to_s, EdgeType, VertexType, FloatInt, get_z_box_label
 from .graph.base import BaseGraph, VT, ET
 from .circuit import Circuit
 
-if settings.mode == "notebook":
-    from IPython.display import display, HTML # type: ignore
-elif settings.mode == "browser":
+if get_mode() == "notebook":
+    from IPython.display import display, HTML
+elif get_mode() == "browser":
     from browser import document, html # type: ignore
 
 if TYPE_CHECKING:
@@ -55,11 +57,11 @@ def draw(g: Union[BaseGraph[VT,ET], Circuit], labels: bool=False, **kwargs) -> A
     # TODO: probably better to make labels Optional[bool]
     labels = labels or settings.show_labels
 
-    if settings.mode == "shell":
+    if get_mode() == "shell":
         if plt is None: 
             raise ImportError("This function requires matplotlib.")
         return draw_matplotlib(g, labels, **kwargs)
-    elif settings.mode == "browser":
+    elif get_mode() == "browser":
         return draw_d3(g, labels, **kwargs)
     else: # in notebook
         if settings.drawing_backend == "d3":
@@ -160,9 +162,19 @@ def draw_matplotlib(
         show_scalar: bool                        =False,
         rows: Optional[Tuple[FloatInt,FloatInt]] =None
         ) -> Any: # TODO: Returns a matplotlib figure
+
+    # lazy import matplotlib
+    global plt, path, patches, lines
     if plt is None:
-        raise ImportError("This function requires matplotlib to be installed. "
-            "If you are running in a Jupyter notebook, you can instead use `zx.draw_d3`.")
+        try:
+            plt = importlib.import_module('matplotlib.pyplot')
+            path = importlib.import_module('matplotlib.path')
+            patches = importlib.import_module('matplotlib.patches')
+            lines = importlib.import_module('matplotlib.lines')
+        except ImportError:
+            raise ImportError("This function requires matplotlib to be installed. "
+                "If you are running in a Jupyter notebook, you can instead use `zx.draw_d3`.")
+
     if isinstance(g, Circuit):
         g = g.to_graph(zh=True)
     fig1 = plt.figure(figsize=figsize)
@@ -172,7 +184,6 @@ def draw_matplotlib(
     vs_on_row: Dict[FloatInt, int] = {} # count the vertices on each row
     for v in g.vertices():
         vs_on_row[g.row(v)] = vs_on_row.get(g.row(v), 0) + 1
-    
     #Dict[VT,Tuple[FloatInt,FloatInt]]
     layout = {v:(g.row(v),-g.qubit(v)) for v in g.vertices()}
 
@@ -183,18 +194,21 @@ def draw_matplotlib(
     else:
         vertices = g.vertices()
         edges = g.edges()
-    
     for e in edges:
         sp = layout[g.edge_s(e)]
         tp = layout[g.edge_t(e)]
         et = g.edge_type(e)
         n_row = vs_on_row.get(g.row(g.edge_s(e)), 0)
 
-        
         dx = tp[0] - sp[0]
         dy = tp[1] - sp[1]
         bend_wire = (dx == 0) and h_edge_draw == 'blue' and n_row > 2
-        ecol = '#0099ff' if h_edge_draw == 'blue' and et == 2 else 'black'
+        if et == 2 and h_edge_draw == 'blue':
+            ecol = '#0099ff'
+        elif et == 3:
+            ecol = 'gray'
+        else:
+            ecol = 'black'
 
         if bend_wire:
             bend = 0.25
@@ -219,26 +233,34 @@ def draw_matplotlib(
             ax.add_patch(patches.Rectangle(centre,w,h,angle=angle/math.pi*180,facecolor='yellow',edgecolor='black'))
 
         #plt.plot([sp[0],tp[0]],[sp[1],tp[1]], 'k', zorder=0, linewidth=0.8)
-    
     for v in vertices:
         p = layout[v]
         t = g.type(v)
         a = g.phase(v)
         a_offset = 0.5
+        phase_str = phase_to_s(a, t)
 
         if t == VertexType.Z:
-            ax.add_patch(patches.Circle(p, 0.2, facecolor='green', edgecolor='black', zorder=1))
+            ax.add_patch(patches.Circle(p, 0.2, facecolor='#ccffcc', edgecolor='black', zorder=1))
         elif t == VertexType.X:
-            ax.add_patch(patches.Circle(p, 0.2, facecolor='red', edgecolor='black', zorder=1))
+            ax.add_patch(patches.Circle(p, 0.2, facecolor='#ff8888', edgecolor='black', zorder=1))
         elif t == VertexType.H_BOX:
             ax.add_patch(patches.Rectangle((p[0]-0.1, p[1]-0.1), 0.2, 0.2, facecolor='yellow', edgecolor='black'))
             a_offset = 0.25
+        elif t == VertexType.W_INPUT:
+            ax.add_patch(patches.Circle(p, 0.05, facecolor='black', edgecolor='black', zorder=1))
+        elif t == VertexType.W_OUTPUT:
+            ax.add_patch(patches.Polygon([(p[0]-0.15, p[1]), (p[0]+0.15, p[1]+0.2), (p[0]+0.15, p[1]-0.2)], facecolor='black', edgecolor='black'))
+        elif t == VertexType.Z_BOX:
+            ax.add_patch(patches.Rectangle((p[0]-0.1, p[1]-0.1), 0.2, 0.2, facecolor='#ccffcc', edgecolor='black'))
+            a_offset = 0.25
+            phase_str = str(get_z_box_label(g, v))
         else:
             ax.add_patch(patches.Circle(p, 0.1, facecolor='black', edgecolor='black', zorder=1))
 
         if labels: plt.text(p[0]+0.25, p[1]+0.25, str(v), ha='center', color='gray', fontsize=5)
-        if a: plt.text(p[0], p[1]-a_offset, phase_to_s(a, t), ha='center', color='blue', fontsize=8)
-    
+        if phase_str: plt.text(p[0], p[1]-a_offset, phase_str, ha='center', color='blue', fontsize=8)
+
     if show_scalar:
         x = min((g.row(v) for v in g.vertices()), default = 0)
         y = -sum((g.qubit(v) for v in g.vertices()))/(g.num_vertices()+1)
@@ -254,15 +276,26 @@ def draw_matplotlib(
 # make sure we get a fresh random seed
 random_graphid = random.Random()
 
+# def init_drawing() -> None:
+#     if get_mode() not in ("notebook", "browser"): return
+#
+#     library_code = '<script type="text/javascript">\n'
+#     for lib in ['d3.v5.min.inline.js']:
+#         with open(os.path.join(settings.javascript_location, lib), 'r') as f:
+#             library_code += f.read() + '\n'
+#     library_code += '</script>'
+#     display(HTML(library_code))
+
 def draw_d3(
     g: Union[BaseGraph[VT,ET], Circuit],
     labels:bool=False, 
     scale:Optional[FloatInt]=None, 
     auto_hbox:Optional[bool]=None,
-    show_scalar:bool=False
+    show_scalar:bool=False,
+    vdata: List[str]=[]
     ) -> Any:
 
-    if settings.mode not in ("notebook", "browser"): 
+    if get_mode() not in ("notebook", "browser"): 
         raise Exception("This method only works when loaded in a webpage or Jupyter notebook")
 
     if auto_hbox is None:
@@ -295,31 +328,36 @@ def draw_d3(
               'x': (g.row(v)-minrow + 1) * scale,
               'y': (g.qubit(v)-minqub + 2) * scale,
               't': g.type(v),
-              'phase': phase_to_s(g.phase(v), g.type(v)) }
+              'phase': phase_to_s(g.phase(v), g.type(v)) if g.type(v) != VertexType.Z_BOX else str(get_z_box_label(g, v)),
+              'ground': g.is_ground(v),
+              'vdata': [(key, g.vdata(v, key))
+                  for key in vdata if g.vdata(v, key, None) is not None],
+              }
              for v in g.vertices()]
     links = [{'source': str(g.edge_s(e)),
               'target': str(g.edge_t(e)),
               't': g.edge_type(e) } for e in g.edges()]
     graphj = json.dumps({'nodes': nodes, 'links': links})
-    with open(os.path.join(settings.javascript_location, 'zx_viewer.js'), 'r') as f:
-        viewer_code = f.read()
+
+    with open(os.path.join(settings.javascript_location, 'zx_viewer.inline.js'), 'r') as f:
+        library_code = f.read() + '\n'
+
     text = """<div style="overflow:auto" id="graph-output-{id}"></div>
-<script type="text/javascript">
-{d3_load}
-{viewer_code}
-</script>
-<script type="text/javascript">
-require(['zx_viewer'], function(zx_viewer) {{
-    zx_viewer.showGraph('#graph-output-{id}',
-    JSON.parse('{graph}'), {width}, {height}, {scale}, {node_size}, {hbox}, {labels}, '{scalar_str}');
-}});
-</script>""".format(id = graph_id, d3_load = settings.d3_load_string, viewer_code=viewer_code, 
+<script type="module">
+var d3;
+if (d3 == null) {{ d3 = await import("https://cdn.skypack.dev/d3@5"); }}
+{library_code}
+showGraph('#graph-output-{id}',
+  JSON.parse('{graph}'), {width}, {height}, {scale},
+  {node_size}, {hbox}, {labels}, '{scalar_str}');
+</script>""".format(library_code=library_code,
+                    id = graph_id,
                     graph = graphj, 
-                   width=w, height=h, scale=scale, node_size=node_size,
-                   hbox = 'true' if auto_hbox else 'false',
-                   labels='true' if labels else 'false',
-                   scalar_str=g.scalar.to_unicode() if show_scalar else '')
-    if settings.mode == "notebook":
+                    width=w, height=h, scale=scale, node_size=node_size,
+                    hbox = 'true' if auto_hbox else 'false',
+                    labels='true' if labels else 'false',
+                    scalar_str=g.scalar.to_unicode() if show_scalar else '')
+    if get_mode() == "notebook":
         display(HTML(text))
     else:
         d = html.DIV(style={"overflow": "auto"}, id="graph-output-{}".format(graph_id))
@@ -522,10 +560,10 @@ def matrix_to_latex(m: np.ndarray) -> str:
     best_val = None
     denom = None
     for v in m.flat:
-        if abs(v) > epsilon: # type: ignore #TODO: Figure out how numpy typing works
+        if abs(v) > epsilon:
             if best_val is None: 
                 best_val = v
-                denom = Fraction(cmath.phase(v)/math.pi).limit_denominator(512).denominator # type: ignore #TODO: Figure out how numpy typing works
+                denom = Fraction(cmath.phase(v)/math.pi).limit_denominator(512).denominator
             else:
                 p = Fraction(cmath.phase(v)/math.pi).limit_denominator(512)
                 if p.denominator < denom:
@@ -541,7 +579,7 @@ def matrix_to_latex(m: np.ndarray) -> str:
     v = best_val
     m = m/v
     
-    s = pretty_complex(v) # type: ignore #TODO: Figure out how numpy typing works
+    s = pretty_complex(v)
     if s == "1": s = ""
     if s == "-1": s= "-"
     out += s + "\n\\begin{pmatrix}\n"
