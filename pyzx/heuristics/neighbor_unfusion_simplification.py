@@ -140,7 +140,6 @@ def get_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex, ex
 
     return possible_unfusion_neighbours
 
-
 def unfuse_to_neighbor(graph, current_vertex, neighbor_vertex, desired_phase):
     """
     Unfuse a vertex to its neighbor in a graph.
@@ -167,6 +166,7 @@ def unfuse_to_neighbor(graph, current_vertex, neighbor_vertex, desired_phase):
 
     return (phaseless_spider, phase_spider)
 
+
 def apply_lcomp(graph: BaseGraph[VT,ET], match, flow):
     """
     Apply a local complementation operation to a graph.
@@ -187,7 +187,6 @@ def apply_lcomp(graph: BaseGraph[VT,ET], match, flow):
 
     update_gflow_from_lcomp(graph, vertex, flow)
     apply_rule(graph, lcomp, [(vertex, neighbors_copy)])
-
 
 def apply_pivot(graph: BaseGraph[VT,ET], match, flow):
     """
@@ -248,6 +247,118 @@ def generate_matches(graph, flow, max_vertex_index=None, threshold=1):
         filtered_pivot_matches.append((wire_reduction, vertices, neighbor1, neighbor2))
 
     return (filtered_local_complement_matches, filtered_pivot_matches)
+
+def get_best_match(local_complement_matches, pivot_matches):
+    """
+    Get the best match from the list of local complementation and pivot matches.
+
+    Parameters:
+    local_complement_matches (list): The list of local complementation matches.
+    pivot_matches (list): The list of pivot matches.
+
+    Returns:
+    tuple: A tuple containing the operation type and the best match.
+    """
+    # Sort the local complementation and pivot matches in descending order of their scores
+    local_complement_matches.sort(key=lambda match: match[0], reverse=True)
+    pivot_matches.sort(key=lambda match: match[0], reverse=True)
+
+    operation_type = "pivot"
+
+    if len(local_complement_matches) > 0:
+        if len(pivot_matches) > 0 and local_complement_matches[0][0] > pivot_matches[0][0]:
+            operation_type = "lcomp"
+        elif len(pivot_matches) == 0:
+            operation_type = "lcomp"
+
+    elif len(pivot_matches) == 0:
+        return ("none", None)
+
+    if operation_type == "pivot":
+        return ("pivot", pivot_matches[0])
+    else:
+        return ("lcomp", local_complement_matches[0])
+
+def apply_best_match(graph, local_complement_matches, pivot_matches, flow):
+    """
+    Apply the best match from the list of local complementation and pivot matches to a graph.
+
+    Parameters:
+    graph (BaseGraph): The graph to apply the match to.
+    local_complement_matches (list): The list of local complementation matches.
+    pivot_matches (list): The list of pivot matches.
+    flow (dict): The dictionary representing the flow of the graph.
+
+    Returns:
+    bool: True if a match was applied, False otherwise.
+    """
+    # Sort the local complementation and pivot matches in descending order of their scores
+    local_complement_matches.sort(key=lambda match: match[0], reverse=True)
+    pivot_matches.sort(key=lambda match: match[0], reverse=True)
+
+    operation_type = "pivot"
+
+    if len(local_complement_matches) > 0:
+        if len(pivot_matches) > 0 and local_complement_matches[0][0] > pivot_matches[0][0]:
+            operation_type = "lcomp"
+        elif len(pivot_matches) == 0:
+            operation_type = "lcomp"
+
+    elif len(pivot_matches) == 0:
+        return False
+
+    if operation_type == "pivot":
+        apply_pivot(graph, pivot_matches[0], flow)
+    else:
+        apply_lcomp(graph, local_complement_matches[0], flow)
+
+    return True
+
+# def apply_random_match(g, lcomp_matches, pivot_matches, gfl):
+#     # lcomp_matches.sort(key= lambda m: m[0],reverse=True)
+#     # pivot_matches.sort(key= lambda m: m[0],reverse=True)
+#     method = "pivot"
+
+#     if len(lcomp_matches) > 0:
+#         if len(pivot_matches) > 0:
+#             method = "lcomp" if random.random() < 0.5 else "pivot"    
+#         else:
+#             method = "lcomp"
+#     else:
+#         if len(pivot_matches) == 0:
+#             return False
+
+#     if method == "pivot":
+#         apply_pivot(g,pivot_matches[0], gfl)
+#     else:
+#         apply_lcomp(g,lcomp_matches[0], gfl)
+#     return True
+
+def apply_random_match(graph, local_complement_matches, pivot_matches, flow):
+    """
+    Apply a random match from the list of local complementation and pivot matches to a graph.
+
+    Parameters:
+    graph (BaseGraph): The graph to apply the match to.
+    local_complement_matches (list): The list of local complementation matches.
+    pivot_matches (list): The list of pivot matches.
+    flow (dict): The dictionary representing the flow of the graph.
+
+    Returns:
+    bool: True if a match was applied, False otherwise.
+    """
+    operation_type, match = get_random_match(local_complement_matches, pivot_matches)
+
+    if operation_type == "pivot":
+        apply_pivot(graph, match, flow)
+    elif operation_type == "lcomp":
+        apply_lcomp(graph, match, flow)
+    else:
+        return False
+
+    return True
+
+
 
 def greedy_wire_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, quiet:bool=False, stats=None):
     """
@@ -371,113 +482,3 @@ def sim_annealing_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex_index=None
 
     print("final num edges: ", best_graph.num_edges())
     return best_graph
-
-def apply_random_match(graph, local_complement_matches, pivot_matches, flow):
-    """
-    Apply a random match from the list of local complementation and pivot matches to a graph.
-
-    Parameters:
-    graph (BaseGraph): The graph to apply the match to.
-    local_complement_matches (list): The list of local complementation matches.
-    pivot_matches (list): The list of pivot matches.
-    flow (dict): The dictionary representing the flow of the graph.
-
-    Returns:
-    bool: True if a match was applied, False otherwise.
-    """
-    operation_type, match = get_random_match(local_complement_matches, pivot_matches)
-
-    if operation_type == "pivot":
-        apply_pivot(graph, match, flow)
-    elif operation_type == "lcomp":
-        apply_lcomp(graph, match, flow)
-    else:
-        return False
-
-    return True
-
-# def apply_random_match(g, lcomp_matches, pivot_matches, gfl):
-#     # lcomp_matches.sort(key= lambda m: m[0],reverse=True)
-#     # pivot_matches.sort(key= lambda m: m[0],reverse=True)
-#     method = "pivot"
-
-#     if len(lcomp_matches) > 0:
-#         if len(pivot_matches) > 0:
-#             method = "lcomp" if random.random() < 0.5 else "pivot"    
-#         else:
-#             method = "lcomp"
-#     else:
-#         if len(pivot_matches) == 0:
-#             return False
-
-#     if method == "pivot":
-#         apply_pivot(g,pivot_matches[0], gfl)
-#     else:
-#         apply_lcomp(g,lcomp_matches[0], gfl)
-#     return True
-
-def apply_best_match(graph, local_complement_matches, pivot_matches, flow):
-    """
-    Apply the best match from the list of local complementation and pivot matches to a graph.
-
-    Parameters:
-    graph (BaseGraph): The graph to apply the match to.
-    local_complement_matches (list): The list of local complementation matches.
-    pivot_matches (list): The list of pivot matches.
-    flow (dict): The dictionary representing the flow of the graph.
-
-    Returns:
-    bool: True if a match was applied, False otherwise.
-    """
-    # Sort the local complementation and pivot matches in descending order of their scores
-    local_complement_matches.sort(key=lambda match: match[0], reverse=True)
-    pivot_matches.sort(key=lambda match: match[0], reverse=True)
-
-    operation_type = "pivot"
-
-    if len(local_complement_matches) > 0:
-        if len(pivot_matches) > 0 and local_complement_matches[0][0] > pivot_matches[0][0]:
-            operation_type = "lcomp"
-        elif len(pivot_matches) == 0:
-            operation_type = "lcomp"
-
-    elif len(pivot_matches) == 0:
-        return False
-
-    if operation_type == "pivot":
-        apply_pivot(graph, pivot_matches[0], flow)
-    else:
-        apply_lcomp(graph, local_complement_matches[0], flow)
-
-    return True
-
-def get_best_match(local_complement_matches, pivot_matches):
-    """
-    Get the best match from the list of local complementation and pivot matches.
-
-    Parameters:
-    local_complement_matches (list): The list of local complementation matches.
-    pivot_matches (list): The list of pivot matches.
-
-    Returns:
-    tuple: A tuple containing the operation type and the best match.
-    """
-    # Sort the local complementation and pivot matches in descending order of their scores
-    local_complement_matches.sort(key=lambda match: match[0], reverse=True)
-    pivot_matches.sort(key=lambda match: match[0], reverse=True)
-
-    operation_type = "pivot"
-
-    if len(local_complement_matches) > 0:
-        if len(pivot_matches) > 0 and local_complement_matches[0][0] > pivot_matches[0][0]:
-            operation_type = "lcomp"
-        elif len(pivot_matches) == 0:
-            operation_type = "lcomp"
-
-    elif len(pivot_matches) == 0:
-        return ("none", None)
-
-    if operation_type == "pivot":
-        return ("pivot", pivot_matches[0])
-    else:
-        return ("lcomp", local_complement_matches[0])

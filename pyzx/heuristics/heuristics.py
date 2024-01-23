@@ -27,7 +27,6 @@ def get_phase_type(phase):
 
 
 
-
 def lcomp_heuristic(graph: BaseGraph[VT,ET], target_vertex, debug=False):
     """
     Calculates local complementation heuristic (LCH)
@@ -64,7 +63,6 @@ def lcomp_heuristic(graph: BaseGraph[VT,ET], target_vertex, debug=False):
     else:
         return heuristic_result - 1
 
-
 def lcomp_heuristic_for_boundary(graph: BaseGraph[VT,ET], target_vertex):
     """
     Calculates local complementation heuristic (LCH) if spider is a boundary spider
@@ -81,7 +79,6 @@ def lcomp_heuristic_for_boundary(graph: BaseGraph[VT,ET], target_vertex):
         if graph.type(neighbor) == VertexType.BOUNDARY:
             boundary_neighbors_count += 1
     return lcomp_heuristic(graph, target_vertex) - boundary_neighbors_count
-
 
 def lcomp_heuristic_neighbor_unfusion(graph: BaseGraph[VT,ET], target_vertex, unfused_neighbor, debug=False):
     """
@@ -106,7 +103,6 @@ def lcomp_heuristic_neighbor_unfusion(graph: BaseGraph[VT,ET], target_vertex, un
     if debug:
         print("connected_neighbors ",connected_neighbors_count,"max_connections ",heuristic_result)
     return heuristic_result + len(target_vertex_neighbors) - 2
-
 
 
 
@@ -159,7 +155,6 @@ def pivot_heuristic(graph: BaseGraph[VT,ET], edge, debug=False):
     else:
         return heuristic_result - 2
 
-
 def pivot_heuristic_for_boundary(graph: BaseGraph[VT,ET], edge):
     """
     Calculates pivoting heuristic (PH) if one or both spiders adjacent to the edge are boundary spiders
@@ -180,7 +175,6 @@ def pivot_heuristic_for_boundary(graph: BaseGraph[VT,ET], edge):
         if graph.type(neighbor) == VertexType.BOUNDARY:
             boundary_neighbors_count += 1 
     return pivot_heuristic(graph,edge) - boundary_neighbors_count
-
 
 def pivot_heuristic_neighbor_unfusion(graph: BaseGraph[VT,ET], edge, unfused_neighbor_u, unfused_neighbor_v, debug=False):
     """

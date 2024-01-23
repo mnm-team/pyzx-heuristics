@@ -135,45 +135,6 @@ def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
 
     return matches
 
-
-def apply_best_match(graph, local_complement_matches, pivot_matches):
-    """
-    Applies the rule with the best heuristic result, i.e., the rule which eliminates the most Hadamard wires
-
-    Parameters: 
-    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e., ZX-diagram
-    local_complement_matches (List[MatchLcompHeuristicType]): A list of matches for local complementation
-    pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
-
-    Returns:
-    bool: True if some rule has been applied, False if both match lists are empty
-    """
-    # Sort the matches in descending order based on the heuristic result
-    local_complement_matches.sort(key=lambda match: match[0], reverse=True)
-    pivot_matches.sort(key=lambda match: match[0], reverse=True)
-
-    method_to_apply = "pivot"
-
-    # If there are local complement matches
-    if len(local_complement_matches) > 0:
-        # If there are also pivot matches and the best local complement match is better than the best pivot match
-        if len(pivot_matches) > 0 and local_complement_matches[0][0] > pivot_matches[0][0]:
-            method_to_apply = "lcomp"
-        else:
-            # If there are no pivot matches, set the method to be used as "lcomp"
-            method_to_apply = "lcomp"
-    else:
-        if len(pivot_matches) == 0:
-            return False
-
-    if method_to_apply == "pivot":
-        apply_pivot(graph, pivot_matches[0][1])
-    else:
-        apply_lcomp(graph, local_complement_matches[0][1])
-
-    return True
-
-
 def generate_filtered_matches(graph, include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1):
     """
     Collects and filters all matches for local complementation and pivoting
@@ -216,7 +177,6 @@ def generate_filtered_matches(graph, include_boundaries=False, include_gadgets=F
 
     return (filtered_local_complement_matches, filtered_pivot_matches)
 
-
 def get_random_match(local_complement_matches, pivot_matches):
     """
     Randomly selects a rule application out of the given matches
@@ -250,6 +210,43 @@ def get_random_match(local_complement_matches, pivot_matches):
         return ("lcomp", local_complement_matches[random.randint(0, len(local_complement_matches) - 1)])
 
 
+def apply_best_match(graph, local_complement_matches, pivot_matches):
+    """
+    Applies the rule with the best heuristic result, i.e., the rule which eliminates the most Hadamard wires
+
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e., ZX-diagram
+    local_complement_matches (List[MatchLcompHeuristicType]): A list of matches for local complementation
+    pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
+
+    Returns:
+    bool: True if some rule has been applied, False if both match lists are empty
+    """
+    # Sort the matches in descending order based on the heuristic result
+    local_complement_matches.sort(key=lambda match: match[0], reverse=True)
+    pivot_matches.sort(key=lambda match: match[0], reverse=True)
+
+    method_to_apply = "pivot"
+
+    # If there are local complement matches
+    if len(local_complement_matches) > 0:
+        # If there are also pivot matches and the best local complement match is better than the best pivot match
+        if len(pivot_matches) > 0 and local_complement_matches[0][0] > pivot_matches[0][0]:
+            method_to_apply = "lcomp"
+        else:
+            # If there are no pivot matches, set the method to be used as "lcomp"
+            method_to_apply = "lcomp"
+    else:
+        if len(pivot_matches) == 0:
+            return False
+
+    if method_to_apply == "pivot":
+        apply_pivot(graph, pivot_matches[0][1])
+    else:
+        apply_lcomp(graph, local_complement_matches[0][1])
+
+    return True
+
 def apply_random_match(graph, local_complement_matches, pivot_matches):
     """
     Applies a randomly selected rule on the given graph.
@@ -273,102 +270,6 @@ def apply_random_match(graph, local_complement_matches, pivot_matches):
 
     return True
 
-
-def random_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet=True, stats=None):
-    """
-    Random Hadamard wire reduction
-
-    Parameters: 
-    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-    include_boundaries (bool): whether to include boundary spiders
-    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
-    max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
-    threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
-
-    Returns:
-    int: The number of iterations, i.e. rule applications
-    """
-    has_changes_occurred = True
-    rule_application_count = 0
-
-    while has_changes_occurred:
-        has_changes_occurred = False
-        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold)
-        if apply_random_match(graph, local_complement_matches, pivot_matches):
-            rule_application_count += 1
-            has_changes_occurred = True
-
-    return rule_application_count
-
-
-def greedy_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet=True, stats=None):
-    """
-    Greedy Hadamard wire reduction
-
-    Parameters: 
-    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-    include_boundaries (bool): whether to include boundary spiders
-    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
-    max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
-    threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
-
-    Returns:
-    int: The number of iterations, i.e. rule applications
-    """
-    has_changes_occurred = True
-    rule_application_count = 0
-
-    while has_changes_occurred:
-        has_changes_occurred = False
-        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold)
-
-        if apply_best_match(graph, local_complement_matches, pivot_matches):
-            rule_application_count += 1
-            has_changes_occurred = True
-
-    return rule_application_count
-
-
-def simulated_annealing_reduce(graph: BaseGraph[VT,ET], initial_temperature=100, cooling_factor=0.95, threshold=-100000, quiet=True, stats=None):
-    """
-    Hadamard wire reduction with simulated annealing (does not work very well yet)
-
-    Parameters: 
-    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-    initial_temperature (int): Initial temperature for the simulated annealing process
-    cooling_factor (float): Factor by which the temperature is reduced in each iteration
-    threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
-
-    Returns:
-    int: 0
-    """
-    temperature = initial_temperature
-    minimum_temperature = 0.01
-    iteration_count = 0
-
-    while temperature > minimum_temperature:
-        iteration_count += 1
-        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=True, include_gadgets=True, threshold=threshold)
-
-        rule_type, selected_match = get_random_match(local_complement_matches, pivot_matches)
-        if rule_type == "none":
-            temperature = 0
-            break
-
-        if selected_match[0] < 0:
-            # If the probability of accepting the match is less than a random probability
-            if math.exp(selected_match[0]/temperature) < random.random():
-                temperature *= cooling_factor
-                continue
-
-        if rule_type == "pivot":
-            apply_pivot(graph, selected_match[1])
-        else:
-            apply_lcomp(graph, selected_match[1])
-
-        temperature *= cooling_factor
-
-    return 0
 
 
 def apply_lcomp(graph: BaseGraph[VT,ET], match):
@@ -410,7 +311,6 @@ def apply_lcomp(graph: BaseGraph[VT,ET], match):
     else:
         apply_rule(graph, lcomp, [(vertex, neighbors_copy)])
 
-
 def apply_pivot(graph: BaseGraph[VT,ET], matched_vertices):
     """
     Applies pivoting on edge dependent on phase of its adjacent vertices and whether they are boundary or not
@@ -449,3 +349,98 @@ def apply_pivot(graph: BaseGraph[VT,ET], matched_vertices):
     # Apply the pivot rule to the matched vertices
     apply_rule(graph, pivot, [(vertex1, vertex2, [], [])])
 
+
+
+def greedy_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet=True, stats=None):
+    """
+    Greedy Hadamard wire reduction
+
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    include_boundaries (bool): whether to include boundary spiders
+    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
+    max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
+    threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+
+    Returns:
+    int: The number of iterations, i.e. rule applications
+    """
+    has_changes_occurred = True
+    rule_application_count = 0
+
+    while has_changes_occurred:
+        has_changes_occurred = False
+        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold)
+
+        if apply_best_match(graph, local_complement_matches, pivot_matches):
+            rule_application_count += 1
+            has_changes_occurred = True
+
+    return rule_application_count
+
+def random_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet=True, stats=None):
+    """
+    Random Hadamard wire reduction
+
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    include_boundaries (bool): whether to include boundary spiders
+    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
+    max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
+    threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+
+    Returns:
+    int: The number of iterations, i.e. rule applications
+    """
+    has_changes_occurred = True
+    rule_application_count = 0
+
+    while has_changes_occurred:
+        has_changes_occurred = False
+        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold)
+        if apply_random_match(graph, local_complement_matches, pivot_matches):
+            rule_application_count += 1
+            has_changes_occurred = True
+
+    return rule_application_count
+
+def simulated_annealing_reduce(graph: BaseGraph[VT,ET], initial_temperature=100, cooling_factor=0.95, threshold=-100000, quiet=True, stats=None):
+    """
+    Hadamard wire reduction with simulated annealing (does not work very well yet)
+
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    initial_temperature (int): Initial temperature for the simulated annealing process
+    cooling_factor (float): Factor by which the temperature is reduced in each iteration
+    threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+
+    Returns:
+    int: 0
+    """
+    temperature = initial_temperature
+    minimum_temperature = 0.01
+    iteration_count = 0
+
+    while temperature > minimum_temperature:
+        iteration_count += 1
+        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=True, include_gadgets=True, threshold=threshold)
+
+        rule_type, selected_match = get_random_match(local_complement_matches, pivot_matches)
+        if rule_type == "none":
+            temperature = 0
+            break
+
+        if selected_match[0] < 0:
+            # If the probability of accepting the match is less than a random probability
+            if math.exp(selected_match[0]/temperature) < random.random():
+                temperature *= cooling_factor
+                continue
+
+        if rule_type == "pivot":
+            apply_pivot(graph, selected_match[1])
+        else:
+            apply_lcomp(graph, selected_match[1])
+
+        temperature *= cooling_factor
+
+    return 0
