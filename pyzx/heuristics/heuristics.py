@@ -8,6 +8,26 @@ class PhaseType(Enum):
     CLIFFORD = 2
     NON_CLIFFORD = 3
 
+def get_phase_type(phase):
+    """
+    Helper function for distinguishing phases between True Clifford, Clifford and non-Clifford
+
+    Parameters: 
+    phase (Fraction): phase between 0 and 2π represented as Fraction of π
+
+    Returns:
+    PhaseType: PhaseType.TRUE_CLIFFORD for True Clifford, PhaseType.CLIFFORD for Clifford and PhaseType.NON_CLIFFORD for non-Clifford phase
+    """
+    if phase == Fraction(1,2) or phase == Fraction(3,2):
+        return PhaseType.TRUE_CLIFFORD
+    elif phase == Fraction(1,1) or phase == 0:
+        return PhaseType.CLIFFORD
+    else:
+        return PhaseType.NON_CLIFFORD
+
+
+
+
 def lcomp_heuristic(graph: BaseGraph[VT,ET], target_vertex, debug=False):
     """
     Calculates local complementation heuristic (LCH)
@@ -43,6 +63,52 @@ def lcomp_heuristic(graph: BaseGraph[VT,ET], target_vertex, debug=False):
         return heuristic_result - 1
     else:
         return heuristic_result - 1
+
+
+def lcomp_heuristic_for_boundary(graph: BaseGraph[VT,ET], target_vertex):
+    """
+    Calculates local complementation heuristic (LCH) if spider is a boundary spider
+
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    target_vertex (int): spider where local complementation is to be applied
+
+    Returns:
+    int: Amount of saved (positive number) or added (negative number) Hadamard wires when applying local complementation on the given vertex 
+    """
+    boundary_neighbors_count = 0
+    for neighbor in graph.neighbors(target_vertex):
+        if graph.type(neighbor) == VertexType.BOUNDARY:
+            boundary_neighbors_count += 1
+    return lcomp_heuristic(graph, target_vertex) - boundary_neighbors_count
+
+
+def lcomp_heuristic_neighbor_unfusion(graph: BaseGraph[VT,ET], target_vertex, unfused_neighbor, debug=False):
+    """
+    Calculates heuristic for neighbor unfusion + local complementation
+
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    target_vertex (int): spider where local complementation is to be applied
+    unfused_neighbor (int): neighbor of target_vertex to which the non-Clifford phase is unfused
+    debug (bool): print details of calculation
+
+    Returns:
+    int: Amount of saved (positive number) or added (negative number) Hadamard wires when applying neighbor unfusion with local complementation on the given vertex 
+    """
+    target_vertex_neighbors = set(graph.neighbors(target_vertex))
+    connected_neighbors_count = 0 #connected neighbours
+    max_connections = len(target_vertex_neighbors)*(len(target_vertex_neighbors)-1)/2 #maximal number of connections
+    target_vertex_neighbors.remove(unfused_neighbor) #remove unfused_neighbor from calculation
+    for neighbor in target_vertex_neighbors:
+        connected_neighbors_count += len(target_vertex_neighbors & graph.neighbors(neighbor))
+    heuristic_result = connected_neighbors_count - max_connections
+    if debug:
+        print("connected_neighbors ",connected_neighbors_count,"max_connections ",heuristic_result)
+    return heuristic_result + len(target_vertex_neighbors) - 2
+
+
+
 
 def pivot_heuristic(graph: BaseGraph[VT,ET], edge, debug=False):
     """
@@ -93,23 +159,6 @@ def pivot_heuristic(graph: BaseGraph[VT,ET], edge, debug=False):
     else:
         return heuristic_result - 2
 
-def get_phase_type(phase):
-    """
-    Helper function for distinguishing phases between True Clifford, Clifford and non-Clifford
-
-    Parameters: 
-    phase (Fraction): phase between 0 and 2π represented as Fraction of π
-
-    Returns:
-    PhaseType: PhaseType.TRUE_CLIFFORD for True Clifford, PhaseType.CLIFFORD for Clifford and PhaseType.NON_CLIFFORD for non-Clifford phase
-    """
-    if phase == Fraction(1,2) or phase == Fraction(3,2):
-        return PhaseType.TRUE_CLIFFORD
-    elif phase == Fraction(1,1) or phase == 0:
-        return PhaseType.CLIFFORD
-    else:
-        return PhaseType.NON_CLIFFORD
-
 
 def pivot_heuristic_for_boundary(graph: BaseGraph[VT,ET], edge):
     """
@@ -133,50 +182,7 @@ def pivot_heuristic_for_boundary(graph: BaseGraph[VT,ET], edge):
     return pivot_heuristic(graph,edge) - boundary_neighbors_count
 
 
-def lcomp_heuristic_for_boundary(graph: BaseGraph[VT,ET], target_vertex):
-    """
-    Calculates local complementation heuristic (LCH) if spider is a boundary spider
-
-    Parameters: 
-    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-    target_vertex (int): spider where local complementation is to be applied
-
-    Returns:
-    int: Amount of saved (positive number) or added (negative number) Hadamard wires when applying local complementation on the given vertex 
-    """
-    boundary_neighbors_count = 0
-    for neighbor in graph.neighbors(target_vertex):
-        if graph.type(neighbor) == VertexType.BOUNDARY:
-            boundary_neighbors_count += 1
-    return lcomp_heuristic(graph, target_vertex) - boundary_neighbors_count
-
-
-def unfusion_complementation_heuristic(graph: BaseGraph[VT,ET], target_vertex, unfused_neighbor, debug=False):
-    """
-    Calculates heuristic for neighbor unfusion + local complementation
-
-    Parameters: 
-    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-    target_vertex (int): spider where local complementation is to be applied
-    unfused_neighbor (int): neighbor of target_vertex to which the non-Clifford phase is unfused
-    debug (bool): print details of calculation
-
-    Returns:
-    int: Amount of saved (positive number) or added (negative number) Hadamard wires when applying neighbor unfusion with local complementation on the given vertex 
-    """
-    target_vertex_neighbors = set(graph.neighbors(target_vertex))
-    connected_neighbors_count = 0 #connected neighbours
-    max_connections = len(target_vertex_neighbors)*(len(target_vertex_neighbors)-1)/2 #maximal number of connections
-    target_vertex_neighbors.remove(unfused_neighbor) #remove unfused_neighbor from calculation
-    for neighbor in target_vertex_neighbors:
-        connected_neighbors_count += len(target_vertex_neighbors & graph.neighbors(neighbor))
-    heuristic_result = connected_neighbors_count - max_connections
-    if debug:
-        print("connected_neighbors ",connected_neighbors_count,"max_connections ",heuristic_result)
-    return heuristic_result + len(target_vertex_neighbors) - 2
-
-
-def pivot_heuristic_with_neighbor_unfusion(graph: BaseGraph[VT,ET], edge, unfused_neighbor_u, unfused_neighbor_v, debug=False):
+def pivot_heuristic_neighbor_unfusion(graph: BaseGraph[VT,ET], edge, unfused_neighbor_u, unfused_neighbor_v, debug=False):
     """
     Calculates heuristic for neighbor unfusion + pivoting
 

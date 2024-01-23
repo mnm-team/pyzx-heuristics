@@ -90,12 +90,13 @@ def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
         # Skip this edge if both vertices are not Z vertices
         if not (vertex_types[vertex0] == VertexType.Z and vertex_types[vertex1] == VertexType.Z): continue
 
-        is_vertex0_gadget = get_phase_type(graph.phase(vertex0)) != PhaseType.CLIFFORD
-        is_vertex1_gadget = get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD
+        is_vertex0_not_clifford = get_phase_type(graph.phase(vertex0)) != PhaseType.CLIFFORD
+        is_vertex1_not_clifford = get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD
 
-        if include_gadgets == False and (is_vertex0_gadget or is_vertex1_gadget): continue 
-        if get_phase_type(graph.phase(vertex0)) != 2 and get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD: continue 
-        # Skip this edge if either vertex has only one neighbor (i.e., it's a top of a phase gadget)
+        if include_gadgets == False and (is_vertex0_not_clifford or is_vertex1_not_clifford): continue
+        # Skip if both vertices are either true clifford or not clifford phase types
+        if is_vertex0_not_clifford and is_vertex1_not_clifford: continue 
+        # Skip if the vertices have only one neighbor (i.e., they are leaf nodes)
         if len(graph.neighbors(vertex0)) == 1 or len(graph.neighbors(vertex1)) == 1: continue 
 
         vertex0_already_gadget = False
@@ -118,10 +119,10 @@ def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
             if len(graph.neighbors(neighbor)) == 1 and get_phase_type(graph.phases()[vertex1]) != PhaseType.CLIFFORD: 
                 vertex1_already_gadget = True
 
-        if (vertex0_already_gadget and is_vertex0_gadget) or (vertex1_already_gadget and is_vertex1_gadget): continue
+        if (vertex0_already_gadget and is_vertex0_not_clifford) or (vertex1_already_gadget and is_vertex1_not_clifford): continue
         if not include_boundaries and boundary_count > 0: continue
 
-        spider_count = -2 + boundary_count + (2 if is_vertex0_gadget else 0) + (2 if is_vertex1_gadget else 0)
+        spider_count = -2 + boundary_count + (2 if is_vertex0_not_clifford else 0) + (2 if is_vertex1_not_clifford else 0)
 
         if include_boundaries:
             matches.append((pivot_heuristic(graph,edge)-boundary_count,(vertex0,vertex1), spider_count))
