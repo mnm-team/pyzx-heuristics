@@ -28,9 +28,9 @@ def evaluate_strategy(circuit, strategy, params = {}):
     t_s = time.time()
 
     if strategy == "greedy_simp":
-        zx.simplify.greedy_simp(g, cap=params['cap'], max_v=params['max_v'])
+        zx.simplify.greedy_simp(g, threshold=params['cap'], max_v=params['max_v'])
     elif strategy == "random_simp":
-        zx.simplify.random_simp(g, cap=params['cap'], max_v=params['max_v'])
+        zx.simplify.random_simp(g, threshold=params['cap'], max_v=params['max_v'])
     elif strategy == "random_simp_neighbors":
         zx.simplify.random_simp_neighbors(g, params['cap'], params['max_v'])
     elif strategy == "greedy_simp_neighbors":

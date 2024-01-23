@@ -12,19 +12,19 @@ from .gflow_calculation import update_gflow_from_double_insertion, update_gflow_
 
 from pyzx.rules import apply_rule, lcomp, pivot
 from pyzx.utils import VertexType, EdgeType
-# from pyzx.gflow import gflow
+from pyzx.gflow import gflow
 from pyzx.graph.base import BaseGraph, VT, ET
 
 
 MatchLcompHeuristicNeighbourType = Tuple[float,Tuple[VT,List[VT],VT]]
 
-def lcomp_matcher(graph: BaseGraph[VT,ET], graph_flow=None) -> List[MatchLcompHeuristicNeighbourType]:
+def lcomp_matcher(graph: BaseGraph[VT,ET], flow=None) -> List[MatchLcompHeuristicNeighbourType]:
     """
     Find all vertices in the graph that can be matched for local complementation.
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to perform the operation on.
-    graph_flow (dict): The dictionary representing the flow of the graph.
+    flow (dict): The dictionary representing the flow of the graph.
 
     Returns:
     list: A list of tuples, each containing the heuristic value, the vertex and its neighbors, and the neighbor for unfusion.
@@ -53,20 +53,20 @@ def lcomp_matcher(graph: BaseGraph[VT,ET], graph_flow=None) -> List[MatchLcompHe
             # Append a tuple with the heuristic value, the current vertex and its neighbors, and None for the neighbor for unfusion
             matches.append((lcomp_heuristic(graph,current_vertex),(current_vertex,current_vertex_neighbors),None))
         else:
-            for neighbor in get_possible_unfusion_neighbours(graph, current_vertex, None, graph_flow):
+            for neighbor in get_possible_unfusion_neighbours(graph, current_vertex, None, flow):
                 matches.append((lcomp_heuristic_neighbor_unfusion(graph,current_vertex,neighbor),(current_vertex,current_vertex_neighbors),neighbor))
 
     return matches
 
 MatchPivotHeuristicNeighbourType = Tuple[float,Tuple[VT,VT],VT,VT]
 
-def pivot_matcher(graph: BaseGraph[VT,ET], graph_flow=None) -> List[MatchPivotHeuristicNeighbourType]:
+def pivot_matcher(graph: BaseGraph[VT,ET], flow=None) -> List[MatchPivotHeuristicNeighbourType]:
     """
     Find all edges in the graph that can be matched for a pivot operation.
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to perform the operation on.
-    graph_flow (dict): The dictionary representing the flow of the graph.
+    flow (dict): The dictionary representing the flow of the graph.
 
     Returns:
     list: A list of tuples, each containing the heuristic value, the vertices of the edge, and the neighbors for unfusion.
@@ -100,15 +100,15 @@ def pivot_matcher(graph: BaseGraph[VT,ET], graph_flow=None) -> List[MatchPivotHe
                 # Append a tuple with the heuristic value, the vertices of the edge, and None for the neighbors for unfusion
                 matches.append((pivot_heuristic(graph,current_edge),(vertex_0,vertex_1),None,None))
             else:
-                for neighbor in get_possible_unfusion_neighbours(graph, vertex_1, vertex_0, graph_flow):
+                for neighbor in get_possible_unfusion_neighbours(graph, vertex_1, vertex_0, flow):
                     matches.append((pivot_heuristic_neighbor_unfusion(graph,current_edge,None,neighbor),(vertex_0,vertex_1),None,neighbor))
         else:
             if get_phase_type(graph.phase(vertex_1)) == PhaseType.CLIFFORD:
-                for neighbor in get_possible_unfusion_neighbours(graph, vertex_0, vertex_1, graph_flow):
+                for neighbor in get_possible_unfusion_neighbours(graph, vertex_0, vertex_1, flow):
                     matches.append((pivot_heuristic_neighbor_unfusion(graph,current_edge,neighbor,None),(vertex_0,vertex_1),neighbor,None))
             else:
-                for neighbor_v0 in get_possible_unfusion_neighbours(graph, vertex_0, vertex_1, graph_flow):
-                    for neighbor_v1 in get_possible_unfusion_neighbours(graph, vertex_1, vertex_0, graph_flow):
+                for neighbor_v0 in get_possible_unfusion_neighbours(graph, vertex_0, vertex_1, flow):
+                    for neighbor_v1 in get_possible_unfusion_neighbours(graph, vertex_1, vertex_0, flow):
                         matches.append((pivot_heuristic_neighbor_unfusion(graph,current_edge,neighbor_v0,neighbor_v1),(vertex_0,vertex_1),neighbor_v0,neighbor_v1))
 
     return matches
@@ -121,7 +121,7 @@ def get_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex, ex
     graph (BaseGraph[VT,ET]): The graph to perform the operation on.
     current_vertex (VT): The vertex to find possible unfusion neighbors for.
     exclude_vertex (VT, optional): A vertex to exclude from the possible unfusion neighbors.
-    graph_flow (dict, optional): The dictionary representing the flow of the graph.
+    flow (dict, optional): The dictionary representing the flow of the graph.
 
     Returns:
     list: A list of vertices that are possible neighbors for unfusion.
@@ -212,14 +212,14 @@ def apply_pivot(graph: BaseGraph[VT,ET], match, flow):
     update_gflow_from_pivot(graph, vertex_1, vertex_2, flow)
     apply_rule(graph, pivot, [(vertex_1, vertex_2, [], [])])
 
-def generate_matches(graph, flow, max_vertex=None, threshold=1):
+def generate_matches(graph, flow, max_vertex_index=None, threshold=1):
     """
     Generate matches for local complementation and pivot operations in a graph.
 
     Parameters:
     graph (BaseGraph): The graph to generate matches for.
     flow (dict): The dictionary representing the flow of the graph.
-    max_vertex (int, optional): The maximum vertex to consider for matches.
+    max_vertex_index (int, optional): The maximum vertex to consider for matches.
     threshold (int, optional): The minimum wire reduction for a match to be considered.
 
     Returns:
@@ -235,7 +235,7 @@ def generate_matches(graph, flow, max_vertex=None, threshold=1):
         wire_reduction, vertices, neighbor = match
         if wire_reduction < threshold:
             continue
-        if max_vertex and wire_reduction <= 0 and vertices[0] > max_vertex:
+        if max_vertex_index and wire_reduction <= 0 and vertices[0] > max_vertex_index:
             continue
         filtered_local_complement_matches.append((wire_reduction, vertices, neighbor))
 
@@ -243,19 +243,19 @@ def generate_matches(graph, flow, max_vertex=None, threshold=1):
         wire_reduction, vertices, neighbor1, neighbor2 = match
         if wire_reduction < threshold:
             continue
-        if max_vertex and wire_reduction <= 0 and vertices[0] > max_vertex and vertices[1] > max_vertex:
+        if max_vertex_index and wire_reduction <= 0 and vertices[0] > max_vertex_index and vertices[1] > max_vertex_index:
             continue
         filtered_pivot_matches.append((wire_reduction, vertices, neighbor1, neighbor2))
 
     return (filtered_local_complement_matches, filtered_pivot_matches)
 
-def greedy_wire_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex=None, threshold=1, quiet:bool=False, stats=None):
+def greedy_wire_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, quiet:bool=False, stats=None):
     """
     Reduce the number of wires in a graph using a greedy approach with neighbor unfusion.
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to reduce the number of wires in.
-    max_vertex (int, optional): The maximum vertex to consider for matches.
+    max_vertex_index (int, optional): The maximum vertex to consider for matches.
     threshold (int, optional): The minimum wire reduction for a match to be considered.
     quiet (bool, optional): Whether to suppress output.
     stats (dict, optional): A dictionary to store statistics.
@@ -263,15 +263,13 @@ def greedy_wire_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex=None, thresh
     Returns:
     int: The number of iterations performed.
     """
-    from pyzx.gflow import gflow
-
     changes_made = True
     iteration_count = 0
     flow = gflow(graph)[1]
 
     while changes_made:
         changes_made = False
-        local_complement_matches, pivot_matches = generate_matches(graph, graph_flow=flow, max_vertex=max_vertex, threshold=threshold)
+        local_complement_matches, pivot_matches = generate_matches(graph, flow=flow, max_vertex_index=max_vertex_index, threshold=threshold)
         if apply_best_match(graph, local_complement_matches, pivot_matches, flow):
             iteration_count += 1
             changes_made = True
@@ -279,13 +277,13 @@ def greedy_wire_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex=None, thresh
 
     return iteration_count
 
-def random_wire_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex=None, threshold=1, quiet:bool=False, stats=None):
+def random_wire_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, quiet:bool=False, stats=None):
     """
     Reduce the number of wires in a graph using a random approach with neighbor unfusion.
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to reduce the number of wires in.
-    max_vertex (int, optional): The maximum vertex to consider for matches.
+    max_vertex_index (int, optional): The maximum vertex to consider for matches.
     threshold (int, optional): The minimum wire reduction for a match to be considered.
     quiet (bool, optional): Whether to suppress output.
     stats (dict, optional): A dictionary to store statistics.
@@ -293,15 +291,13 @@ def random_wire_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex=None, thresh
     Returns:
     int: The number of iterations performed.
     """
-    from pyzx.gflow import gflow
-
     changes_made = True
     iteration_count = 0
     flow = gflow(graph)[1]
 
     while changes_made:
         changes_made = False
-        local_complement_matches, pivot_matches = generate_matches(graph, graph_flow=flow, max_vertex=max_vertex, threshold=threshold)
+        local_complement_matches, pivot_matches = generate_matches(graph, flow=flow, max_vertex_index=max_vertex_index, threshold=threshold)
         if apply_random_match(graph, local_complement_matches, pivot_matches, flow):
             iteration_count += 1
             changes_made = True
@@ -309,14 +305,14 @@ def random_wire_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex=None, thresh
 
     return iteration_count
 
-def sim_annealing_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex=None, iterations=100, cooling_rate=0.95, threshold=-100000, quiet:bool=False, stats=None):
+def sim_annealing_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex_index=None, initial_temperature=100, cooling_rate=0.95, threshold=-100000, quiet:bool=False, stats=None):
     """
     Reduce the number of wires in a graph using simulated annealing with neighbor unfusion.
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to reduce the number of wires in.
-    max_vertex (int, optional): The maximum vertex to consider for matches.
-    iterations (int, optional): The number of iterations to perform.
+    max_vertex_index (int, optional): The maximum vertex to consider for matches.
+    initial_temperature (int, optional): initial_temperature (int): Initial temperature for the simulated annealing process.
     cooling_rate (float, optional): The rate at which the temperature decreases.
     threshold (int, optional): The minimum wire reduction for a match to be considered.
     quiet (bool, optional): Whether to suppress output.
@@ -325,9 +321,7 @@ def sim_annealing_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex=None, iter
     Returns:
     BaseGraph[VT,ET]: The graph with the reduced number of wires.
     """
-    from pyzx.gflow import gflow
-
-    temperature = iterations
+    temperature = initial_temperature
     min_temperature = 1
     iteration_count = 0
     flow = gflow(graph)[1]
@@ -340,7 +334,7 @@ def sim_annealing_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex=None, iter
 
     while temperature > min_temperature:
         iteration_count += 1
-        local_complement_matches, pivot_matches = generate_matches(graph, graph_flow=flow, max_vertex=max_vertex, threshold=threshold)
+        local_complement_matches, pivot_matches = generate_matches(graph, flow=flow, max_vertex_index=max_vertex_index, threshold=threshold)
         operation, match = get_best_match(local_complement_matches, pivot_matches)
         if match[0] <= 0:
             if backtrack:
@@ -386,7 +380,7 @@ def apply_random_match(graph, local_complement_matches, pivot_matches, flow):
     graph (BaseGraph): The graph to apply the match to.
     local_complement_matches (list): The list of local complementation matches.
     pivot_matches (list): The list of pivot matches.
-    graph_flow (dict): The dictionary representing the flow of the graph.
+    flow (dict): The dictionary representing the flow of the graph.
 
     Returns:
     bool: True if a match was applied, False otherwise.

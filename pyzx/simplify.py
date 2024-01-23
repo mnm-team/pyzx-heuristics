@@ -28,14 +28,15 @@ __all__ = ['bialg_simp','spider_simp', 'id_simp', 'phase_free_simp', 'pivot_simp
         'to_clifford_normal_form_graph']
 
 from typing import List, Callable, Optional, Union, Generic, Tuple, Dict, Iterator, cast
-from pyzx.heuristics.neighbor_unfusion import greedy_wire_reduce_neighbor, random_wire_reduce_neighbor, sim_annealing_reduce_neighbor
 
-from pyzx.heuristics.simplify import greedy_wire_reduce, random_wire_reduce, simulated_annealing_reduce
 
 from .utils import EdgeType, VertexType, toggle_edge, vertex_is_zx, toggle_vertex
 from .rules import *
 from .graph.base import BaseGraph, VT, ET
 from .circuit import Circuit
+
+from pyzx.heuristics.neighbor_unfusion_simplification import greedy_wire_reduce_neighbor, random_wire_reduce_neighbor, sim_annealing_reduce_neighbor
+from pyzx.heuristics.simplification import greedy_wire_reduce, random_wire_reduce, simulated_annealing_reduce
 
 class Stats(object):
     def __init__(self) -> None:
@@ -217,7 +218,7 @@ def teleport_reduce(g: BaseGraph[VT,ET], quiet:bool=True, stats:Optional[Stats]=
     s.full_reduce(quiet=quiet, stats=stats)
     return s.mastergraph
 
-def greedy_simp(g: BaseGraph[VT,ET], boundaries=False, gadgets=False, max_vertices=None, cap=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`greedy_wire_reduce` to achieve a greedy simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -225,17 +226,17 @@ def greedy_simp(g: BaseGraph[VT,ET], boundaries=False, gadgets=False, max_vertic
     spider_simp(g, quiet=quiet, stats=stats)
     to_gh(g)
     iteration_count = 0
-    max_vertices = len(g.vertex_set()) if max_vertices else None
+    max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
     while True:
         id_simp_count = id_simp(g, quiet=quiet, stats=stats)
         spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-        greedy_wire_reduce_count = greedy_wire_reduce(g, boundaries=boundaries, gadgets=gadgets ,max_v=max_vertices, cap=cap, quiet=quiet, stats=stats)
+        greedy_wire_reduce_count = greedy_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets ,max_vertex_index=max_vertex_index, threshold=threshold, quiet=quiet, stats=stats)
             
         if id_simp_count + spider_simp_count + greedy_wire_reduce_count == 0: break
         iteration_count += 1
     return iteration_count
 
-def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertices=None, cap=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`greedy_wire_reduce_neighbor` to achieve a greedy simplification of the graph including neighbor unfusion.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -243,49 +244,17 @@ def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertices=None, cap=1, quiet:b
     spider_simp(g, quiet=quiet, stats=stats)
     to_gh(g)
     iteration_count = 0
-    max_vertices = len(g.vertex_set()) if max_vertices else None
+    max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
     while True:
         id_simp_count = id_simp(g, quiet=quiet, stats=stats)
         spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-        greedy_wire_reduce_neighbor_count = greedy_wire_reduce_neighbor(g,max_v=max_vertices, cap=cap, quiet=quiet, stats=stats)
+        greedy_wire_reduce_neighbor_count = greedy_wire_reduce_neighbor(g,max_vertex_index=max_vertex_index, threshold=threshold, quiet=quiet, stats=stats)
             
         if id_simp_count + spider_simp_count + greedy_wire_reduce_neighbor_count == 0: break
         iteration_count += 1
     return iteration_count
 
-def random_simp_neighbors(g: BaseGraph[VT,ET], max_vertices=None, cap=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
-    """
-    This simplification procedure runs :func`random_wire_reduce_neighbor` to achieve a random simplification of the graph including neighbor unfusion.
-    The heuristic is based on the number of edges that are removed in the simplification.
-    """
-    spider_simp(g, quiet=quiet, stats=stats)
-    to_gh(g)
-    iteration_count = 0
-    max_vertices = len(g.vertex_set()) if max_vertices else None
-    while True:
-        id_simp_count = id_simp(g, quiet=quiet, stats=stats)
-        spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-        random_wire_reduce_neighbor_count = random_wire_reduce_neighbor(g, max_v=max_vertices, cap=cap, quiet=quiet, stats=stats)
-            
-        if id_simp_count + spider_simp_count + random_wire_reduce_neighbor_count == 0: break
-        iteration_count += 1
-    return iteration_count
-
-def sim_anneal_simp_neighbors(g: BaseGraph[VT,ET], max_vertices=None, cap=-10000, iterations=100, alpha=0.95, quiet:bool=True, stats:Optional[Stats]=None) -> int:
-    """
-    This simplification procedure runs :func`sim_annealing_reduce_neighbor` to achieve a simulated annealing simplification of the graph including neighbor unfusion.
-    The heuristic is based on the number of edges that are removed in the simplification.
-    """
-    spider_simp(g, quiet=quiet, stats=stats)
-    to_gh(g)
-    iteration_count = 0
-    max_vertices = len(g.vertex_set()) if max_vertices else None
-    id_simp(g, quiet=quiet, stats=stats)
-    spider_simp(g, quiet=quiet, stats=stats) 
-    g = sim_annealing_reduce_neighbor(g, max_v=max_vertices, cap=cap, iterations=iterations, alpha=alpha, quiet=quiet, stats=stats)
-    return g
-
-def random_simp(g: BaseGraph[VT,ET], boundaries=False, gadgets=False, max_vertices=None, cap=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def random_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`random_wire_reduce` to achieve a random simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -293,17 +262,35 @@ def random_simp(g: BaseGraph[VT,ET], boundaries=False, gadgets=False, max_vertic
     spider_simp(g, quiet=quiet, stats=stats)
     to_gh(g)
     iteration_count = 0
-    max_vertices = len(g.vertex_set()) if max_vertices else None
+    max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
     while True:
         id_simp_count = id_simp(g, quiet=quiet, stats=stats)
         spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-        random_wire_reduce_count = random_wire_reduce(g, boundaries=boundaries, gadgets=gadgets ,max_v=max_vertices, cap=cap, quiet=quiet, stats=stats)
+        random_wire_reduce_count = random_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold, quiet=quiet, stats=stats)
             
         if id_simp_count + spider_simp_count + random_wire_reduce_count == 0: break
         iteration_count += 1
     return iteration_count
 
-def simulated_annealing_simp(g: BaseGraph[VT,ET], iterations = 100, alpha =0.95, cap=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def random_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+    """
+    This simplification procedure runs :func`random_wire_reduce_neighbor` to achieve a random simplification of the graph including neighbor unfusion.
+    The heuristic is based on the number of edges that are removed in the simplification.
+    """
+    spider_simp(g, quiet=quiet, stats=stats)
+    to_gh(g)
+    iteration_count = 0
+    max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
+    while True:
+        id_simp_count = id_simp(g, quiet=quiet, stats=stats)
+        spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
+        random_wire_reduce_neighbor_count = random_wire_reduce_neighbor(g, max_vertex_index=max_vertex_index, threshold=threshold, quiet=quiet, stats=stats)
+            
+        if id_simp_count + spider_simp_count + random_wire_reduce_neighbor_count == 0: break
+        iteration_count += 1
+    return iteration_count
+
+def sim_anneal_simp(g: BaseGraph[VT,ET], initial_temperature = 100, cooling_factor=0.95, threshold=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`simulated_annealing_reduce` to achieve a simulated annealing simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -312,8 +299,22 @@ def simulated_annealing_simp(g: BaseGraph[VT,ET], iterations = 100, alpha =0.95,
     to_gh(g)
     id_simp_count = id_simp(g, quiet=quiet, stats=stats)
     spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-    simulated_annealing_reduce_count = simulated_annealing_reduce(g,iterations=iterations, alpha=alpha , cap=cap, quiet=quiet, stats=stats)
+    simulated_annealing_reduce_count = simulated_annealing_reduce(g, initial_temperature=initial_temperature, cooling_factor=cooling_factor , threshold=threshold, quiet=quiet, stats=stats)
     return id_simp_count + spider_simp_count + simulated_annealing_reduce_count
+
+def sim_anneal_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=-10000, initial_temperature=100, cooling_rate=0.95, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+    """
+    This simplification procedure runs :func`sim_annealing_reduce_neighbor` to achieve a simulated annealing simplification of the graph including neighbor unfusion.
+    The heuristic is based on the number of edges that are removed in the simplification.
+    """
+    spider_simp(g, quiet=quiet, stats=stats)
+    to_gh(g)
+    iteration_count = 0
+    max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
+    id_simp(g, quiet=quiet, stats=stats)
+    spider_simp(g, quiet=quiet, stats=stats) 
+    g = sim_annealing_reduce_neighbor(g, max_vertex_index=max_vertex_index, threshold=threshold, initial_temperature=initial_temperature, cooling_rate=cooling_rate, quiet=quiet, stats=stats)
+    return g
 
 
 class Simplifier(Generic[VT, ET]):

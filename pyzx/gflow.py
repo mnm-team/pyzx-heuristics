@@ -50,11 +50,17 @@ end
 ```
 """
 
-from typing import Dict, Set, Tuple, Optional
+from typing import Dict, Set, Tuple, List, Optional
 
-from .extract import bi_adj
 from .linalg import Mat2
 from .graph.base import BaseGraph, VertexType, VT, ET
+
+
+#Copied from .extract to avoid circular import
+def bi_adj(g: BaseGraph[VT,ET], vs:List[VT], ws:List[VT]) -> Mat2:
+    """Construct a biadjacency matrix between the supplied list of vertices
+    ``vs`` and ``ws``."""
+    return Mat2([[1 if g.connected(v,w) else 0 for v in vs] for w in ws])
 
 
 def gflow(

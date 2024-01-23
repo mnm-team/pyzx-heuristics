@@ -174,7 +174,7 @@ def apply_best_match(graph, local_complement_matches, pivot_matches):
     return True
 
 
-def generate_filtered_matches(graph, include_boundaries=False, include_gadgets=False, max_vertex_index=None, heuristic_threshold=1):
+def generate_filtered_matches(graph, include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1):
     """
     Collects and filters all matches for local complementation and pivoting
 
@@ -183,13 +183,13 @@ def generate_filtered_matches(graph, include_boundaries=False, include_gadgets=F
     include_boundaries (bool): whether to include boundary spiders
     include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
     max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
-    heuristic_threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+    threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
 
     Returns: 
     Tuple (List[MatchLcompHeuristicType], List[MatchPivotHeuristicType]): A tuple with all filtered matches for local complementation and pivoting
     """
-    local_complement_matches = lcomp_matcher(graph, boundaries=include_boundaries, gadgets=include_gadgets)
-    pivot_matches = pivot_matcher(graph, boundaries=include_boundaries, gadgets=include_gadgets)
+    local_complement_matches = lcomp_matcher(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
+    pivot_matches = pivot_matcher(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
 
     filtered_local_complement_matches = []
     filtered_pivot_matches = []
@@ -197,7 +197,7 @@ def generate_filtered_matches(graph, include_boundaries=False, include_gadgets=F
     for match in local_complement_matches:
         wire_reduction, vertices, spider_count = match
         # Skip matches that do not meet the heuristic threshold
-        if wire_reduction < heuristic_threshold:
+        if wire_reduction < threshold:
             continue
         # Skip matches that could cause non-termination
         if max_vertex_index and wire_reduction <= 0 and vertices[0] > max_vertex_index:
@@ -207,7 +207,7 @@ def generate_filtered_matches(graph, include_boundaries=False, include_gadgets=F
     for match in pivot_matches:
         wire_reduction, vertices, spider_count = match
         # Skip matches that do not meet the heuristic threshold
-        if wire_reduction < heuristic_threshold:
+        if wire_reduction < threshold:
             continue
         # Skip matches that could cause non-termination
         if max_vertex_index and wire_reduction <= 0 and vertices[0] > max_vertex_index and vertices[1] > max_vertex_index:
@@ -274,7 +274,7 @@ def apply_random_match(graph, local_complement_matches, pivot_matches):
     return True
 
 
-def random_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, heuristic_threshold=1, quiet=True, stats=None):
+def random_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet=True, stats=None):
     """
     Random Hadamard wire reduction
 
@@ -283,7 +283,7 @@ def random_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, includ
     include_boundaries (bool): whether to include boundary spiders
     include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
     max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
-    heuristic_threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+    threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
 
     Returns:
     int: The number of iterations, i.e. rule applications
@@ -293,7 +293,7 @@ def random_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, includ
 
     while has_changes_occurred:
         has_changes_occurred = False
-        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, heuristic_threshold=heuristic_threshold)
+        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold)
         if apply_random_match(graph, local_complement_matches, pivot_matches):
             rule_application_count += 1
             has_changes_occurred = True
@@ -301,7 +301,7 @@ def random_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, includ
     return rule_application_count
 
 
-def greedy_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, heuristic_threshold=1, quiet=True, stats=None):
+def greedy_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet=True, stats=None):
     """
     Greedy Hadamard wire reduction
 
@@ -310,7 +310,7 @@ def greedy_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, includ
     include_boundaries (bool): whether to include boundary spiders
     include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
     max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
-    heuristic_threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+    threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
 
     Returns:
     int: The number of iterations, i.e. rule applications
@@ -320,7 +320,7 @@ def greedy_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, includ
 
     while has_changes_occurred:
         has_changes_occurred = False
-        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, heuristic_threshold=heuristic_threshold)
+        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold)
 
         if apply_best_match(graph, local_complement_matches, pivot_matches):
             rule_application_count += 1
@@ -329,7 +329,7 @@ def greedy_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, includ
     return rule_application_count
 
 
-def simulated_annealing_reduce(graph: BaseGraph[VT,ET], initial_temperature=100, cooling_factor=0.95, heuristic_threshold=-100000):
+def simulated_annealing_reduce(graph: BaseGraph[VT,ET], initial_temperature=100, cooling_factor=0.95, threshold=-100000, quiet=True, stats=None):
     """
     Hadamard wire reduction with simulated annealing (does not work very well yet)
 
@@ -337,7 +337,7 @@ def simulated_annealing_reduce(graph: BaseGraph[VT,ET], initial_temperature=100,
     graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
     initial_temperature (int): Initial temperature for the simulated annealing process
     cooling_factor (float): Factor by which the temperature is reduced in each iteration
-    heuristic_threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+    threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
 
     Returns:
     int: 0
@@ -348,7 +348,7 @@ def simulated_annealing_reduce(graph: BaseGraph[VT,ET], initial_temperature=100,
 
     while temperature > minimum_temperature:
         iteration_count += 1
-        local_complement_matches, pivot_matches = generate_filtered_matches(graph, boundaries=True, gadgets=True, cap=heuristic_threshold)
+        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=True, include_gadgets=True, threshold=threshold)
 
         rule_type, selected_match = get_random_match(local_complement_matches, pivot_matches)
         if rule_type == "none":
