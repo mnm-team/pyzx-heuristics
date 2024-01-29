@@ -3,6 +3,7 @@ import random
 
 from fractions import Fraction
 from typing import Tuple, List
+from functools import partial
 
 from .heuristics import PhaseType, get_phase_type, lcomp_heuristic, pivot_heuristic
 from .tools import insert_identity, insert_phase_gadget
@@ -209,6 +210,41 @@ def get_random_match(local_complement_matches, pivot_matches):
     else:
         return ("lcomp", local_complement_matches[random.randint(0, len(local_complement_matches) - 1)])
 
+def get_best_match(local_complement_matches, pivot_matches):
+    """
+    Returns the rule and matchin vertex with the best heuristic result, i.e., the rule which eliminates the most Hadamard wires
+
+    Parameters:
+    local_complement_matches (List[MatchLcompHeuristicType]): A list of matches for local complementation
+    pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
+
+    Returns:
+    match (Dict[str, MatchLcompHeuristicType | MatchPivotHeuristicType]): The best match. None if no match has been applied.
+    """
+    # Sort the matches in descending order based on the heuristic result
+    local_complement_matches.sort(key=lambda match: match[0], reverse=True)
+    pivot_matches.sort(key=lambda match: match[0], reverse=True)
+
+    method_to_apply = "pivot"
+
+    # If there are local complement matches
+    if len(local_complement_matches) > 0:
+        # If there are also pivot matches and the best local complement match is better than the best pivot match
+        if len(pivot_matches) > 0:
+            if local_complement_matches[0][0] > pivot_matches[0][0]:
+                method_to_apply = "lcomp"      
+        else:
+            method_to_apply = "lcomp"
+    else:
+        if len(pivot_matches) == 0:
+            return None
+
+    if method_to_apply == "pivot":
+        return {"match": pivot_matches[0], "match type": "pivot"}
+    else:
+        return {"match": local_complement_matches[0], "match type": "lcomp"}
+
+
 
 def apply_best_match(graph, local_complement_matches, pivot_matches):
     """
@@ -220,7 +256,7 @@ def apply_best_match(graph, local_complement_matches, pivot_matches):
     pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
 
     Returns:
-    bool: True if some rule has been applied, False if both match lists are empty
+    match (Dict[str, MatchLcompHeuristicType | MatchPivotHeuristicType]): The match that has been applied. None if no match has been applied.
     """
     # Sort the matches in descending order based on the heuristic result
     local_complement_matches.sort(key=lambda match: match[0], reverse=True)
@@ -231,21 +267,21 @@ def apply_best_match(graph, local_complement_matches, pivot_matches):
     # If there are local complement matches
     if len(local_complement_matches) > 0:
         # If there are also pivot matches and the best local complement match is better than the best pivot match
-        if len(pivot_matches) > 0 and local_complement_matches[0][0] > pivot_matches[0][0]:
-            method_to_apply = "lcomp"
+        if len(pivot_matches) > 0:
+            if local_complement_matches[0][0] > pivot_matches[0][0]:
+                method_to_apply = "lcomp"      
         else:
-            # If there are no pivot matches, set the method to be used as "lcomp"
             method_to_apply = "lcomp"
     else:
         if len(pivot_matches) == 0:
-            return False
+            return None
 
     if method_to_apply == "pivot":
         apply_pivot(graph, pivot_matches[0][1])
+        return {"match": pivot_matches[0], "match type": "pivot"}
     else:
         apply_lcomp(graph, local_complement_matches[0][1])
-
-    return True
+        return {"match": local_complement_matches[0], "match type": "lcomp"}
 
 def apply_random_match(graph, local_complement_matches, pivot_matches):
     """
@@ -257,18 +293,18 @@ def apply_random_match(graph, local_complement_matches, pivot_matches):
     pivot_matches (List[MatchPivotHeuristicType]): A list of matches for pivoting
 
     Returns:
-    bool: True if a rule has been applied, False if both match lists are empty
+    match: The match that has been applied. None if no match has been applied.
     """
     rule_type, selected_match = get_random_match(local_complement_matches, pivot_matches)
 
     if rule_type == "pivot":
         apply_pivot(graph, selected_match[1])
+        return {"match": selected_match, "match type": "pivot"}
     elif rule_type == "lcomp":
         apply_lcomp(graph, selected_match[1])
+        return {"match": selected_match, "match type": "lcomp"}
     else:
-        return False
-
-    return True
+        return None
 
 
 
@@ -351,28 +387,117 @@ def apply_pivot(graph: BaseGraph[VT,ET], matched_vertices):
 
 
 
-def greedy_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet=True, stats=None):
+def search_match_with_best_result_at_depth(graph: BaseGraph[VT,ET], local_complement_matches, pivot_matches, lookahead, include_boundaries, include_gadgets, threshold, max_vertex_index):
     """
-    Greedy Hadamard wire reduction
+    Perform a depth-first search on the graph to find the best result at a specific depth.
 
-    Parameters: 
-    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    This function recursively explores the graph using depth-first search. When the specified depth (lookahead) is reached,
+    it applies the best match (either a local complement or a pivot) to the graph and updates the best result found so far.
+    The search continues until all paths have been explored to the lookahead depth.
+
+    Parameters:
+    graph (Graph): The graph to search.
+    local_complement_matches (list): List of local complement matches.
+    pivot_matches (list): List of pivot matches.
+    lookahead (int): The depth at which to find the best result.
     include_boundaries (bool): whether to include boundary spiders
     include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
     max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine (needed to prevent non-termination in the case of heuristic_threshold<0).
     threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
 
     Returns:
-    int: The number of iterations, i.e. rule applications
+    The best result found at the lookahead depth and the match that led to it.
+    """
+    generate_filtered_matches_partial = partial(generate_filtered_matches, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold)
+    return _depth_search_for_best_result(graph, local_complement_matches, pivot_matches, lookahead, generate_filtered_matches_partial)
+
+def _depth_search_for_best_result(graph: BaseGraph[VT,ET], local_complement_matches, pivot_matches, lookahead, generate_filtered_matches, depth=0, best_result=None, best_match=None):
+    """
+    Parameters:
+    depth (int, optional): Current depth of the search. Defaults to 0.
+    best_result: The best result found so far. Defaults to None.
+    best_match: The match that led to the best result. Defaults to None.
+
+    Returns:
+    The best result found at the look-ahead depth and the match that led to it.
+    """
+    if depth == lookahead:
+        current_result = get_best_match(local_complement_matches, pivot_matches)
+        if best_result is None or current_result["match"][0] > best_result["match"][0]:
+            best_result = current_result
+
+        return best_result
+    
+    elif depth == 0:
+        for local_complement_match in local_complement_matches:
+            lookahead_graph = graph.clone()
+            apply_lcomp(lookahead_graph, local_complement_match[1])
+            lookahead_local_complement_matches, lookahead_pivot_matches = generate_filtered_matches(lookahead_graph)
+            current_result = _depth_search_for_best_result(lookahead_graph, lookahead_local_complement_matches, lookahead_pivot_matches, lookahead, generate_filtered_matches, depth + 1, best_result)
+            if best_result is None or current_result["match"][0] > best_result["match"][0]:
+                best_result = current_result
+                best_match = {"match": local_complement_match, "match type": "lcomp"}
+
+        for pivot_match in pivot_matches:
+            lookahead_graph = graph.clone()
+            apply_pivot(lookahead_graph, pivot_match[1])
+            lookahead_local_complement_matches, lookahead_pivot_matches = generate_filtered_matches(lookahead_graph)
+            current_result = _depth_search_for_best_result(lookahead_graph, lookahead_local_complement_matches, lookahead_pivot_matches, lookahead, generate_filtered_matches, depth + 1, best_result)
+            if best_result is None or current_result["match"][0] > best_result["match"][0]:
+                best_result = current_result
+                best_match = {"match": pivot_match, "match type": "pivot"}
+
+        return best_match
+
+    else:
+        for local_complement_match in local_complement_matches:
+            lookahead_graph = graph.clone()
+            apply_lcomp(lookahead_graph, local_complement_match[1])
+            lookahead_local_complement_matches, lookahead_pivot_matches = generate_filtered_matches(lookahead_graph)
+            best_result = _depth_search_for_best_result(lookahead_graph, lookahead_local_complement_matches, lookahead_pivot_matches, lookahead, generate_filtered_matches, depth + 1, best_result)
+
+        for pivot_match in pivot_matches:
+            lookahead_graph = graph.clone()
+            apply_pivot(lookahead_graph, pivot_match[1])
+            lookahead_local_complement_matches, lookahead_pivot_matches = generate_filtered_matches(lookahead_graph)
+            best_result = _depth_search_for_best_result(lookahead_graph, lookahead_local_complement_matches, lookahead_pivot_matches, lookahead, generate_filtered_matches, depth + 1, best_result)
+
+        return best_result
+
+
+
+def greedy_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, lookahead=0, quiet=True, stats=None):
+    """
+    Perform a greedy Hadamard wire reduction on the given graph.
+
+    This function iteratively applies the best local complement or pivot match to the graph until no further improvements can be made. The "best" match is determined by a heuristic that considers the number of Hadamard wires added by the match.
+
+    Parameters:
+    graph (BaseGraph[VT,ET]): The graph to simplify.
+    include_boundaries (bool): Whether to include boundary spiders in the search for matches. Defaults to False.
+    include_gadgets (bool): Whether to include non-Clifford spiders in the search for matches. Defaults to False.
+    max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine. This is needed to prevent non-termination in the case of heuristic_threshold<0.
+    threshold (int): Lower bound for heuristic result. Any rule application which adds more than this number of Hadamard wires is filtered out. Defaults to 1.
+    lookahead (int): The number of steps to look ahead when searching for the best match. Defaults to 0.
+
+    Returns:
+    int: The number of rule applications, i.e., the number of iterations the function went through to simplify the graph.
     """
     has_changes_occurred = True
     rule_application_count = 0
 
     while has_changes_occurred:
-        has_changes_occurred = False
-        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold)
 
-        if apply_best_match(graph, local_complement_matches, pivot_matches):
+        has_changes_occurred = False
+        local_complement_matches, pivot_matches = generate_filtered_matches(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold)        
+        best_match = search_match_with_best_result_at_depth(graph, local_complement_matches, pivot_matches, lookahead, include_boundaries, include_gadgets, threshold, max_vertex_index)
+        
+        if best_match is not None:
+            if best_match["match type"] == "lcomp":
+                apply_lcomp(graph, best_match["match"][1])
+            else:
+                apply_pivot(graph, best_match["match"][1])
+
             rule_application_count += 1
             has_changes_occurred = True
 
