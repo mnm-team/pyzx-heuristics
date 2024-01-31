@@ -27,6 +27,7 @@ __all__ = ['bialg_simp','spider_simp', 'id_simp', 'phase_free_simp', 'greedy_wir
         'full_reduce', 'teleport_reduce', 'reduce_scalar', 'supplementarity_simp',
         'to_clifford_normal_form_graph']
 
+import logging
 from typing import List, Callable, Optional, Union, Generic, Tuple, Dict, Iterator, cast
 
 
@@ -223,6 +224,7 @@ def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
     This simplification procedure runs :func`greedy_wire_reduce` to achieve a greedy simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
     """
+    final_matches = []
     spider_simp(g, quiet=quiet, stats=stats)
     to_gh(g)
     iteration_count = 0
@@ -230,11 +232,13 @@ def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
     while True:
         id_simp_count = id_simp(g, quiet=quiet, stats=stats)
         spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-        greedy_wire_reduce_count = greedy_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets ,max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
-            
+        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets ,max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
+        if len(applied_matches) > 0: 
+            final_matches = applied_matches
+            logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
         if id_simp_count + spider_simp_count + greedy_wire_reduce_count == 0: break
         iteration_count += 1
-    return iteration_count
+    return iteration_count, final_matches
 
 def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
