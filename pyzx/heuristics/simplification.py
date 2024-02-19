@@ -139,6 +139,8 @@ def lcomp_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
         current_vertex = vertex_candidates.pop()
         match = check_lcomp_match(graph, current_vertex, include_boundaries, include_gadgets, calculate_heuristic)
 
+        #TODO: Clone graph and apply match: Check if filter is false -> do not add match to match dictonary
+
         if match is not None:
             match_key, match_value = match
             matches[match_key] = match_value
@@ -164,6 +166,8 @@ def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
     while len(edge_candidates) > 0:
         edge = edge_candidates.pop()
         match = check_pivot_match(graph, edge, include_boundaries, include_gadgets, calculate_heuristic)
+
+        #TODO: Clone graph and apply match: Check if filter is false -> do not add match to match dictonary
 
         if match is not None:
             match_key, match_value = match
@@ -390,6 +394,34 @@ def get_random_match(lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pi
     else:
         return random.choice(list(lcomp_matches.items()))
 
+
+def get_best_and_random_matches(n:int, lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType]) -> Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
+    """
+    Get the best and a random match out of the given matches
+
+    Parameters: 
+    n (int): The number of matches to return.
+    lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): A dict of matches for local complementation
+    pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): A dict of matches for pivoting
+
+    Returns:
+    List[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None: A list of the best and a random matches. None if no match has been applied.
+    """
+    if len(lcomp_matches) == 0 and len(pivot_matches) == 0:
+        return None
+    
+    if n <= 0:
+        raise ValueError("n must be greater than 0")
+    
+    # Sort the matches in descending order based on the heuristic result
+    match_dict = dict(sorted({**lcomp_matches, **pivot_matches}.items(), key=lambda item: item[1][0], reverse=True))
+
+    best_matches = list(match_dict.items())[:max(n//3, 1)]
+    random_matches = random.sample(list(match_dict.items())[max(n//3, 1):], n-max(n//3, 1))
+
+    return {**dict(best_matches), **dict(random_matches)}
+
+
 def get_matches_from_beginning_middle_end(n: int, lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType]) -> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]:
     """
     Get n best matches incrementally from the beginning, middle, and end of local complement and pivot matches.
@@ -409,60 +441,53 @@ def get_matches_from_beginning_middle_end(n: int, lcomp_matches: Dict[Tuple[VT],
     lcomp_matches = dict(sorted(lcomp_matches.items(), key=lambda item: item[1][0], reverse=True))
     pivot_matches = dict(sorted(pivot_matches.items(), key=lambda item: item[1][0], reverse=True))
 
-    matches = {}
-
     local_complement_keys = list(lcomp_matches.keys())
     pivot_keys = list(pivot_matches.keys())
 
     # Initialize separate indices for local complement and pivot matches
-    lcomp_indices = [0, len(lcomp_matches) // 3, len(lcomp_matches)-1]
-    pivot_indices = [0, len(pivot_matches) // 3, len(pivot_matches)-1]
+    lcomp_indices = [0, len(lcomp_matches) // 3, len(lcomp_matches)-1 if len(lcomp_matches) > 0 else 0]
+    pivot_indices = [0, len(pivot_matches) // 3, len(pivot_matches)-1 if len(pivot_matches) > 0 else 0]
 
-    # Store the initial indices to check for repetition later
-    initial_lcomp_indices = [0, len(lcomp_matches) // 3, 2* len(lcomp_matches) // 3]
-    initial_pivot_indices = [0, len(pivot_matches) // 3, 2* len(pivot_matches) // 3]
+    matches = {}
+    selected_matches = 0
 
-    for i in range(n):
-        # Select the index based on the current iteration
-        lcomp_index = lcomp_indices[i % 3]
-        pivot_index = pivot_indices[i % 3]
+    while selected_matches < n and (not all(idx >= len(local_complement_keys) for idx in lcomp_indices[:2]) or lcomp_indices[2] >= 0) and (not all(idx >= len(pivot_keys) for idx in pivot_indices[:2]) or pivot_indices[2] >= 0):
+        for i in range(3):
+            lcomp_index = lcomp_indices[i]
+            pivot_index = pivot_indices[i]
 
-        # Check if the index is within the length of the list and has not reached the initial index of the next index set
-        if lcomp_index < len(lcomp_matches) and lcomp_index != initial_lcomp_indices[(i+1) % 3]:
-            lcomp_match = lcomp_matches[local_complement_keys[lcomp_index]]
-        else:
-            lcomp_match = None
+            if lcomp_index >= 0 and lcomp_index < len(local_complement_keys):
+                lcomp_match = lcomp_matches.get(local_complement_keys[lcomp_index])
+            else:
+                lcomp_match = None
 
-        if pivot_index < len(pivot_matches) and pivot_index != initial_pivot_indices[(i+1) % 3]:
-            pivot_match = pivot_matches[pivot_keys[pivot_index]]
-        else:
-            pivot_match = None
+            if pivot_index >= 0 and pivot_index < len(pivot_keys):
+                pivot_match = pivot_matches.get(pivot_keys[pivot_index])
+            else:
+                pivot_match = None
 
-        if lcomp_match and pivot_match:
-            if lcomp_match[0] > pivot_match[0]:
+            if lcomp_match and pivot_match:
+                if lcomp_match[0] > pivot_match[0]:
+                    matches[local_complement_keys[lcomp_index]] = lcomp_match
+                    lcomp_indices[i] += 1 if i != 2 else -1
+                else:
+                    matches[pivot_keys[pivot_index]] = pivot_match
+                    pivot_indices[i] += 1 if i != 2 else -1
+                selected_matches += 1
+                if selected_matches == n:
+                    break
+            elif lcomp_match:
                 matches[local_complement_keys[lcomp_index]] = lcomp_match
-                if i%3 == 2:
-                    lcomp_indices[i % 3] -= 1
-                else:
-                    lcomp_indices[i % 3] += 1
-            else:
+                lcomp_indices[i] += 1 if i != 2 else -1
+                selected_matches += 1
+                if selected_matches == n:
+                    break
+            elif pivot_match:
                 matches[pivot_keys[pivot_index]] = pivot_match
-                if i%3 == 2:
-                    pivot_indices[i % 3] -= 1
-                else:
-                    pivot_indices[i % 3] += 1
-        elif lcomp_match:
-            matches[local_complement_keys[lcomp_index]] = lcomp_match
-            if i%3 == 2:
-                lcomp_indices[i % 3] -= 1
-            else:
-                lcomp_indices[i % 3] += 1
-        elif pivot_match:
-            matches[pivot_keys[pivot_index]] = pivot_match
-            if i%3 == 2:
-                pivot_indices[i % 3] -= 1
-            else:
-                pivot_indices[i % 3] += 1
+                pivot_indices[i] += 1 if i != 2 else -1
+                selected_matches += 1
+                if selected_matches == n:
+                    break
 
     return matches
 
@@ -481,7 +506,7 @@ def apply_best_match(graph: BaseGraph[VT,ET], lcomp_matches: Dict[Tuple[VT], Mat
     Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None: The match that has been applied. None if no match has been applied.
     """
 
-    matches = get_matches_from_beginning_middle_end(n=1, local_complement_matches=lcomp_matches, pivot_matches=pivot_matches)
+    matches = get_best_and_random_matches(n=1, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
 
     if matches is None:
         return None
@@ -630,11 +655,13 @@ def apply_match(graph: BaseGraph[VT,ET], match: Tuple[Tuple, MatchLcompHeuristic
                     vertex_neighbors.add(vertex_neighbor)
 
         apply_pivot(graph=graph, matched_vertices=match_key)
+        #TODO: Check filter function: If false -> return None
         lcomp_matches, pivot_matches = update_matches(graph=graph, vertex_neighbors=list(vertex_neighbors), removed_vertices=match_key, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
     
     elif len(match_key) == 1:
         _, vertex_neighbors, _ = match_value
         apply_lcomp(graph, (match_key[0], vertex_neighbors))
+        #TODO: Check filter function: If false -> return None
         lcomp_matches, pivot_matches = update_matches(graph=graph, vertex_neighbors=vertex_neighbors, removed_vertices=match_key, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
     
     else:
@@ -765,7 +792,8 @@ def _depth_search_for_best_result(
     """
 
     if depth == lookahead:
-        current_results = get_matches_from_beginning_middle_end(n=1, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+        #TODO: wirte new function to get best match which adhears to filter
+        current_results = get_best_and_random_matches(n=1, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
         if not current_results or (sum([match[0] for match in current_match_dict.values()]) <= 0 and len(current_match_dict) > 0):
             return best_result
         
@@ -779,13 +807,14 @@ def _depth_search_for_best_result(
         return _update_best_result(current_result=current_match_dict, best_result=best_result) if current_match_dict else best_result
 
     num_matches = len(lcomp_matches) + len(pivot_matches)
-    num_sub_branches = max(int(num_matches  ** (1/(depth+2))), 1) if not full_subgraphs else max(num_matches, 1)
+    num_sub_branches = max(int(num_matches  ** (1/(depth+1.5))), 1) if not full_subgraphs else max(num_matches, 1)
 
-    matches = get_matches_from_beginning_middle_end(n=num_sub_branches, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+    matches = get_best_and_random_matches(n=num_sub_branches, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
 
     for match in matches.items():
         lookahead_graph = graph.clone()
         lookahead_current_match_dict = current_match_dict.copy()
+        #TODO: Check if apply_match restuns None: If None -> abandon sub branch (return current best result)
         lookahead_lcomp_matches, lookahead_pivot_matches = apply_match(graph=lookahead_graph, match=match, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
 
         lookahead_current_match_dict[match[0]] = match[1]

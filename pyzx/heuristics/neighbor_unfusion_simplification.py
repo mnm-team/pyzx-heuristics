@@ -49,7 +49,7 @@ def lcomp_matcher(graph: BaseGraph[VT,ET], flow=None) -> List[MatchLcompHeuristi
         
         if boundary: continue # for the moment
 
-        if get_phase_type(graph.phase(current_vertex)) == PhaseType.TRUE_CLIFFORD:
+        if get_phase_type(current_vertex_phase) == PhaseType.TRUE_CLIFFORD:
             # Append a tuple with the heuristic value, the current vertex and its neighbors, and None for the neighbor for unfusion
             matches.append((lcomp_heuristic(graph,current_vertex),(current_vertex,current_vertex_neighbors),None))
         else:
