@@ -485,11 +485,15 @@ class Optimizer(object):
             # Exactly one of t1 and t2 has a hadamard
             # So the CZ commutes trough and becomes a CNOT
             elif t1 in self.hadamards:
-                cnot = CNOT(t2, t1)
-                self.add_cnot(cnot)
+                # cnot = CNOT(t2, t1)
+                # self.add_cnot(cnot)
+                self.add_hadamard(t1)
+                self.add_cz(g)
             else:
-                cnot = CNOT(t1, t2)
-                self.add_cnot(cnot)
+                # cnot = CNOT(t1, t2)
+                # self.add_cnot(cnot)
+                self.add_hadamard(t2)
+                self.add_cz(g)
             
         elif g.name == 'CNOT':
             c, t = g.control, g.target

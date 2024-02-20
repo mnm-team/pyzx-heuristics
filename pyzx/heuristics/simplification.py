@@ -631,7 +631,12 @@ def apply_pivot(graph: BaseGraph[VT,ET], matched_vertices: Tuple[VT, VT]):
     # Apply the pivot rule to the matched vertices
     apply_rule(graph, pivot, [(vertex1, vertex2, [], [])])
 
-def apply_match(graph: BaseGraph[VT,ET], match: Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType], lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType], include_boundaries=False, include_gadgets=False) -> Tuple[Dict[Tuple[VT], MatchLcompHeuristicType], Dict[Tuple[VT,VT], MatchPivotHeuristicType]] | None:
+def apply_match(graph: BaseGraph[VT,ET], match: 
+                Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType], 
+                lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], 
+                pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType], 
+                include_boundaries=False, 
+                include_gadgets=False) -> Tuple[Dict[Tuple[VT], MatchLcompHeuristicType], Dict[Tuple[VT,VT], MatchPivotHeuristicType]] | None:
     """
     Applies the given match to the graph and updates the dicts of local complement and pivot matches.
 
@@ -655,19 +660,15 @@ def apply_match(graph: BaseGraph[VT,ET], match: Tuple[Tuple, MatchLcompHeuristic
                     vertex_neighbors.add(vertex_neighbor)
 
         apply_pivot(graph=graph, matched_vertices=match_key)
-        #TODO: Check filter function: If false -> return None
-        lcomp_matches, pivot_matches = update_matches(graph=graph, vertex_neighbors=list(vertex_neighbors), removed_vertices=match_key, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
+        return update_matches(graph=graph, vertex_neighbors=list(vertex_neighbors), removed_vertices=match_key, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
     
     elif len(match_key) == 1:
         _, vertex_neighbors, _ = match_value
         apply_lcomp(graph, (match_key[0], vertex_neighbors))
-        #TODO: Check filter function: If false -> return None
-        lcomp_matches, pivot_matches = update_matches(graph=graph, vertex_neighbors=vertex_neighbors, removed_vertices=match_key, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
+        return update_matches(graph=graph, vertex_neighbors=vertex_neighbors, removed_vertices=match_key, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
     
     else:
         return None
-
-    return lcomp_matches, pivot_matches
 
 
 
@@ -810,27 +811,30 @@ def _depth_search_for_best_result(
     num_sub_branches = max(int(num_matches  ** (1/(depth+1.5))), 1) if not full_subgraphs else max(num_matches, 1)
 
     matches = get_best_and_random_matches(n=num_sub_branches, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+    logging.debug(f"Depth: {depth}/{lookahead}, Number of matches: {num_matches}, Number of sub-branches: {num_sub_branches}, Best result: {best_result}")
 
     for match in matches.items():
         lookahead_graph = graph.clone()
-        lookahead_current_match_dict = current_match_dict.copy()
-        #TODO: Check if apply_match restuns None: If None -> abandon sub branch (return current best result)
-        lookahead_lcomp_matches, lookahead_pivot_matches = apply_match(graph=lookahead_graph, match=match, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+        lookahead_matches = apply_match(graph=lookahead_graph, match=match, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
 
-        lookahead_current_match_dict[match[0]] = match[1]
-        
-        current_result = _depth_search_for_best_result(
-            graph=lookahead_graph, 
-            lcomp_matches=lookahead_lcomp_matches, 
-            pivot_matches=lookahead_pivot_matches, 
-            lookahead=lookahead, 
-            apply_match=apply_match, 
-            depth=depth + 1, 
-            best_result=best_result, 
-            current_match_dict=lookahead_current_match_dict
-        )
-        
-        best_result = _update_best_result(current_result=current_result, best_result=best_result)
+        if lookahead_matches is not None:
+            lookahead_lcomp_matches, lookahead_pivot_matches = lookahead_matches
+            lookahead_current_match_dict = current_match_dict.copy()
+
+            lookahead_current_match_dict[match[0]] = match[1]
+            
+            current_result = _depth_search_for_best_result(
+                graph=lookahead_graph, 
+                lcomp_matches=lookahead_lcomp_matches, 
+                pivot_matches=lookahead_pivot_matches, 
+                lookahead=lookahead, 
+                apply_match=apply_match, 
+                depth=depth + 1, 
+                best_result=best_result, 
+                current_match_dict=lookahead_current_match_dict
+            )
+            
+            best_result = _update_best_result(current_result=current_result, best_result=best_result)
 
     return best_result
 
@@ -898,8 +902,13 @@ def greedy_wire_reduce(
             
             local_complement_matches, pivot_matches = updated_matches
 
+            logging.debug(f"Applied match #{rule_application_count}: {best_key} with heuristic result: {best_result[0]}")
+            logging.debug(f"Found {len(local_complement_matches)} local complement matches and {len(pivot_matches)} pivot matches after applying match")
+
             rule_application_count += 1
             has_changes_occurred = True
+
+            
 
             applied_matches.append((best_key, best_result))
 

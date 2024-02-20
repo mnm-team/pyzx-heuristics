@@ -235,7 +235,7 @@ def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
         greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets ,max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
             final_matches = applied_matches
-            logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
+            #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
         if id_simp_count + spider_simp_count + greedy_wire_reduce_count == 0: break
         iteration_count += 1
     return iteration_count, final_matches
