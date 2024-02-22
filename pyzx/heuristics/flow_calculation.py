@@ -1,5 +1,6 @@
 import copy
 import itertools
+from typing import Dict, Set, Tuple
 from pyzx.graph.base import BaseGraph, VT, ET, EdgeType
 from pyzx.graph.graph_s import GraphS
 
@@ -219,3 +220,56 @@ def update_gflow_from_lcomp(graph: BaseGraph[VT,ET], lcomp_vertex: VT, gflow):
   gflow.pop(lcomp_vertex)
 
   return gflow
+
+
+
+
+
+Flow = Tuple[Dict[VT, Set[VT]], Dict[VT,int]]
+
+def identify_causal_flow(g: BaseGraph[VT, ET]) -> Flow:
+    solved = set(g.outputs())
+    correctors = set()
+    past: Dict[VT, int] = dict()
+    res: Flow = (dict(),dict())
+    inputs = [list(g.neighbors(i))[0] for i in g.inputs()]
+
+    for o in g.outputs():
+        n = list(g.neighbors(o))[0]
+        res[0][n] = set()
+        res[1][n] = 0
+        solved.add(n)
+        if not n in inputs:
+            past[n] = len(set(g.neighbors(n)).difference(solved))
+            if past[n] == 1:
+                correctors.add(n)
+    
+    depth = 1
+
+    while True:
+        new_corrections = set()
+
+        for corrector in correctors:
+            candidates = set(g.neighbors(corrector)).difference(solved)
+            if len(candidates) == 1:
+                candidate = candidates.pop()
+                res[0][candidate] = set([corrector])
+                res[1][candidate] = depth
+                solved.add(candidate)
+                if not candidate in inputs:
+                    past[candidate] = len(set(g.neighbors(candidate)).difference(solved))
+                    if past[candidate] == 1:
+                        new_corrections.add(candidate)
+                for neighbor in g.neighbors(candidate):
+                    if neighbor in past:
+                        past[neighbor] -= 1
+                        if past[neighbor] == 1:
+                            new_corrections.add(neighbor)
+
+        if not new_corrections:
+            if len(solved) == g.num_vertices() - g.num_inputs():
+                return res
+            return None
+        
+        correctors = new_corrections
+        depth += 1

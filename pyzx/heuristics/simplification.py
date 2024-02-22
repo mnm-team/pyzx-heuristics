@@ -176,6 +176,7 @@ def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
     return matches
 
 
+
 def update_lcomp_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_vertices: Tuple[VT], lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], neighbors_of_neighbors: Set[VT], include_boundaries=False, include_gadgets=False) -> Dict[VT, MatchLcompHeuristicType]:
     # Iterate over the current local complement matches
     lcomp_matches_copy = lcomp_matches.copy()
@@ -316,6 +317,28 @@ def update_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_
 
     return lcomp_matches, pivot_matches 
 
+def update_best_result(
+    current_result: Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType], 
+    best_result: Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None,
+) -> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]:
+    """
+    Updates the best result based on the current result.
+
+    Args:
+        current_result (Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]): The current result to compare.
+        best_result (Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None): The current best result.
+
+    Returns:
+        Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]: The updated best result.
+    """
+
+    if current_result is None:
+        raise ValueError("current_result cannot be None")
+    
+    if best_result is None or sum([match[0] for match in current_result.values()]) > sum([match[0] for match in best_result.values()]):
+        best_result = current_result
+    return best_result
+
 
 
 def generate_filtered_matches(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, calculate_heuristic=True) -> Tuple[Dict[Tuple[VT], MatchLcompHeuristicType], Dict[Tuple[VT,VT], MatchPivotHeuristicType]]:
@@ -361,7 +384,6 @@ def generate_filtered_matches(graph: BaseGraph[VT,ET], include_boundaries=False,
     
     return (filtered_local_complement_matches, filtered_pivot_matches)
 
-
 def get_random_match(lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType]) -> Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]:
     """
     Randomly selects a rule application out of the given matches
@@ -394,8 +416,11 @@ def get_random_match(lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pi
     else:
         return random.choice(list(lcomp_matches.items()))
 
-
-def get_best_and_random_matches(n:int, lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType]) -> Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
+def get_best_and_random_matches(
+    n:int, 
+    lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], 
+    pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType]
+    ) -> Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
     """
     Get the best and a random match out of the given matches
 
@@ -420,7 +445,6 @@ def get_best_and_random_matches(n:int, lcomp_matches: Dict[Tuple[VT], MatchLcomp
     random_matches = random.sample(list(match_dict.items())[max(n//3, 1):], n-max(n//3, 1))
 
     return {**dict(best_matches), **dict(random_matches)}
-
 
 def get_matches_from_beginning_middle_end(n: int, lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType]) -> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]:
     """
@@ -631,224 +655,355 @@ def apply_pivot(graph: BaseGraph[VT,ET], matched_vertices: Tuple[VT, VT]):
     # Apply the pivot rule to the matched vertices
     apply_rule(graph, pivot, [(vertex1, vertex2, [], [])])
 
-def apply_match(graph: BaseGraph[VT,ET], match: 
-                Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType], 
-                lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], 
-                pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType], 
-                include_boundaries=False, 
-                include_gadgets=False) -> Tuple[Dict[Tuple[VT], MatchLcompHeuristicType], Dict[Tuple[VT,VT], MatchPivotHeuristicType]] | None:
-    """
-    Applies the given match to the graph and updates the dicts of local complement and pivot matches.
 
-    Parameters: 
-    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e., ZX-diagram
-    match (Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]): The match to apply.
-    lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): A dict of matches for local complementation
-    pivot_matches (Dict[Tuple[VT,VT, MatchPivotHeuristicType]]): A dict of matches for pivoting
-    include_boundaries (bool): whether to include boundary spiders
 
-    Returns:
-    Tuple[Dict[Tuple[VT], MatchLcompHeuristicType], Dict[Tuple[VT,VT], MatchPivotHeuristicType]]: The updated dicts of local complement and pivot matches
-    """
-    match_key, match_value = match
 
-    if len(match_key) == 2:
-        vertex_neighbors = set()
-        for vertex in match_key:
-            for vertex_neighbor in graph.neighbors(vertex):
-                if vertex_neighbor not in match_key:
-                    vertex_neighbors.add(vertex_neighbor)
 
-        apply_pivot(graph=graph, matched_vertices=match_key)
-        return update_matches(graph=graph, vertex_neighbors=list(vertex_neighbors), removed_vertices=match_key, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
-    
-    elif len(match_key) == 1:
-        _, vertex_neighbors, _ = match_value
-        apply_lcomp(graph, (match_key[0], vertex_neighbors))
-        return update_matches(graph=graph, vertex_neighbors=vertex_neighbors, removed_vertices=match_key, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
-    
-    else:
+class WireReducer:
+    def __init__(
+        self,
+        graph: BaseGraph[VT, ET],
+        include_boundaries=False,
+        include_gadgets=False,
+        max_vertex_index=None,
+        threshold=0,
+        lookahead=0,
+        filter_flow_func: Callable = lambda x: True,
+        quiet=True,
+        stats=None,
+    ):
+        """
+        Initializes a WireReducer object.
+
+        Args:
+            graph (BaseGraph[VT, ET]): The graph to be reduced.
+            include_boundaries (bool): Whether to include boundary spiders.
+            include_gadgets (bool): Whether to include non-Clifford spiders.
+            max_vertex_index: The maximum vertex index.
+            threshold (int): Lower bound for heuristic result.
+            lookahead (int): The depth at which to find the best result.
+            filter_flow_func (Callable): A function to filter out non-flow-preserving matches.
+            quiet (bool): Whether to suppress output.
+            stats: Statistics object to track the reduction process.
+        """
+        self.graph = graph
+        self.include_boundaries = include_boundaries
+        self.include_gadgets = include_gadgets
+        self.max_vertex_index = max_vertex_index
+        self.threshold = threshold
+        self.lookahead = lookahead
+        self.filter_flow_func = filter_flow_func
+        self.quiet = quiet
+        self.stats = stats
+        self.rule_application_count = 0
+        self.applied_matches = []
+
+        self.lookup_flow: Dict[Tuple[VT, VT], bool] = {}
+
+        self.skipped_matches_until_reset = [0]
+        self.skipped_filter_func_evals = 0
+
+    def reset_lookup_flow(self):
+        self.lookup_flow = {}
+
+    def lookup_flow_preserving(self, graph: BaseGraph[VT, ET], edge_set:Set[Tuple[VT, VT]]) -> bool:
+        """
+        Looks up whether the flow is preserved for a given edge set.
+
+        Args:
+            graph (BaseGraph[VT, ET]): The graph to check.
+            edge_set (Set[Tuple[VT, VT]]): The set of edges to check.
+
+        Returns:
+            bool: Whether the flow is preserved for the given edge set.
+        """
+
+        if not all(edge in self.lookup_flow for edge in edge_set):
+            if self.filter_flow_func(graph):
+                for edge in edge_set:
+                    self.lookup_flow[edge] = True
+                return True
+            else:
+                for edge in edge_set:
+                    #FIXME: Not all edges are not flow-preserving. Only edges that are not flow-preserving should be set to False
+                    if self.lookup_flow.get(edge, False) != True:
+                        self.lookup_flow[edge] = False
+                return False
+        
+        self.skipped_filter_func_evals += 1
+        return all(self.lookup_flow[edge] for edge in edge_set)
+
+    def get_best_match(
+        self,
+        graph: BaseGraph[VT,ET],
+        lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], 
+        pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType],
+        ) -> Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
+        """
+        Finds the best match in the given graph based on lcomp_matches and pivot_matches dictionaries.
+        
+        Args:
+            graph (BaseGraph): The graph to search for matches in.
+            lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): Dictionary of matches based on lcomp heuristic.
+            pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): Dictionary of matches based on pivot heuristic.
+            filter_flow_func (Callable, optional): A function used to filter matches. Defaults to lambda x: True.
+            
+        Returns:
+            Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None: The best match found in the graph, 
+            represented as a tuple of match key and match value. Returns None if no matches are found.
+        """
+        if len(lcomp_matches) == 0 and len(pivot_matches) == 0:
+            return None
+        
+        match_dict = dict(sorted({**lcomp_matches, **pivot_matches}.items(), key=lambda item: item[1][0], reverse=True))
+
+        for match_key, match_value in match_dict.items():
+            filter_graph = graph.clone()
+            if self.apply_match(filter_graph, (match_key, match_value)) is not None:
+                return match_key, match_value
+            
         return None
 
 
+    def apply_match(
+        self,
+        graph: BaseGraph[VT, ET],
+        match: Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType], 
+        ) -> Tuple[List[VT], Tuple[VT, ...]] | None:
+        """
+        Applies the given match to the graph and updates the dicts of local complement and pivot matches.
 
+        Parameters:
+        match (Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]): The match to apply.
 
-def full_search_match_with_best_result_at_depth(
-    graph: BaseGraph[VT, ET], 
-    lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType],
-    pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType],
-    lookahead: int, 
-    include_boundaries: bool, 
-    include_gadgets: bool
-    ) -> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
-    """
-    Perform a depth-first search on the graph to find the best result at a specific depth.
+        Returns:
+        Tuple[List[VT], Tuple[VT, ...]] | None: The neighbors of the matched vertices and the removed vertices. None if the match is not flow-preserving.
+        """
+        match_key, match_value = match
 
-    This function recursively explores the graph using depth-first search. When the specified depth (lookahead) is reached,
-    it applies the best match (either a local complement or a pivot) to the graph and updates the best result found so far.
-    The search explores every single path to the maximum lookahead depth.
+        if len(match_key) == 2:
+            vertex_neighbors = set()
+            for vertex in match_key:
+                for vertex_neighbor in graph.neighbors(vertex):
+                    if vertex_neighbor not in match_key:
+                        vertex_neighbors.add(vertex_neighbor)
 
-    Parameters:
-    graph (Graph): The graph to search.
-    lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): Dict of local complement matches.
-    pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): Dict of pivot matches.
-    lookahead (int): The depth at which to find the best result.
-    include_boundaries (bool): whether to include boundary spiders
-    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
-
-    Returns:
-    The best result found at the lookahead depth and the match that led to it.
-    """
-    apply_match_partial = partial(
-        apply_match, 
-        include_boundaries=include_boundaries, 
-        include_gadgets=include_gadgets
-    )
-    return _depth_search_for_best_result(
-        graph=graph, 
-        lcomp_matches=lcomp_matches, 
-        pivot_matches=pivot_matches, 
-        lookahead=lookahead, 
-        apply_match=apply_match_partial,
-        full_subgraphs=True
-    )
-
-def search_match_with_best_result_at_depth(
-    graph: BaseGraph[VT, ET], 
-    lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType],
-    pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType],
-    lookahead: int, 
-    include_boundaries: bool, 
-    include_gadgets: bool
-    ) -> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
-    """
-    Perform a depth-first search on the graph to find the best result at a specific depth.
-
-    This function recursively explores the graph using depth-first search. When the specified depth (lookahead) is reached,
-    it applies the best match (either a local complement or a pivot) to the graph and updates the best result found so far.
-    The search progressively narrows down the percentage of top paths it considers as it delves deeper, meaning it doesn't explore every single path to the maximum lookahead depth.
-
-    Parameters:
-    graph (Graph): The graph to search.
-    lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): Dict of local complement matches.
-    pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): Dict of pivot matches.
-    lookahead (int): The depth at which to find the best result.
-    include_boundaries (bool): whether to include boundary spiders
-    include_gadgets (bool): whether to include non-Clifford spiders (which are transformed into XZ or YZ spiders by the rule application)
-
-    Returns:
-    The best result found at the lookahead depth and the match that led to it.
-    """
-    apply_partial = partial(
-        apply_match, 
-        include_boundaries=include_boundaries, 
-        include_gadgets=include_gadgets
-    )
-    return _depth_search_for_best_result(
-        graph=graph, 
-        lcomp_matches=lcomp_matches, 
-        pivot_matches=pivot_matches, 
-        lookahead=lookahead, 
-        apply_match=apply_partial
-    )
-
-def _update_best_result(
-    current_result: Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType], 
-    best_result: Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None,
-    )-> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
-    
-    if best_result is None or sum([match[0] for match in current_result.values()]) > sum([match[0] for match in best_result.values()]):
-        best_result = current_result
-    return best_result
-
-
-def _depth_search_for_best_result(
-    graph: BaseGraph[VT, ET], 
-    lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType],
-    pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType],
-    apply_match: Callable,
-    lookahead: int,
-    depth: int = 0, 
-    best_result: Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None = None,
-    current_match_dict: Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] = {},
-    full_subgraphs: bool = False
-    ) -> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
-    """
-    Perform a depth-first search on the graph to find the best result at a specific depth.
-    
-    This function recursively explores the graph using depth-first search. When the specified depth (lookahead) is reached,
-    it applies the best match (either a local complement or a pivot) to the graph and updates the best result found so far.
-    If 'full_subgraphs' is False, the search progressively narrows down the percentage of top paths it considers as it delves deeper, meaning it doesn't explore every single path to the maximum lookahead depth.
-    
-    Parameters:
-    graph (Graph): The graph to search.
-    lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): Dict of local complement matches.
-    pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): Dict of pivot matches.
-    lookahead (int): The depth at which to find the best result.
-    apply_match (Callable): The function to apply a match to the graph.
-    depth (int): The current depth of the search.
-    best_result (Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None): The best result found so far.
-    current_match_list (Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]): The current list of matches.
-    full_subgraphs (bool): Whether to consider full subgraphs or not.
-    """
-
-    if depth == lookahead:
-        #TODO: wirte new function to get best match which adhears to filter
-        current_results = get_best_and_random_matches(n=1, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
-        if not current_results or (sum([match[0] for match in current_match_dict.values()]) <= 0 and len(current_match_dict) > 0):
-            return best_result
+            edges = set(edge for vertex in match_key for edge in graph.incident_edges(vertex))
+            apply_pivot(graph=graph, matched_vertices=match_key)
+            if not self.lookup_flow_preserving(graph, edge_set=edges):
+                return None
+            
+            return list(vertex_neighbors), match_key
         
-        current_key, current_result = next(iter(current_results.items()))
-        lookahead_current_match_dict = current_match_dict.copy()
-        lookahead_current_match_dict[current_key] = current_result
-        best_result = _update_best_result(current_result=lookahead_current_match_dict, best_result=best_result)
-        return best_result if sum([match[0] for match in best_result.values()]) > 0 else None
+        elif len(match_key) == 1:
+            _, vertex_neighbors, _ = match_value
+            edges = set(edge for vertex in match_key for edge in graph.incident_edges(vertex))
+            apply_lcomp(graph, (match_key[0], vertex_neighbors))
+            if not self.lookup_flow_preserving(graph, edge_set=edges):
+                return None
+            
+            return vertex_neighbors, match_key
+        
+        else:
+            return None
 
-    if not lcomp_matches and not pivot_matches:
-        return _update_best_result(current_result=current_match_dict, best_result=best_result) if current_match_dict else best_result
+    def apply_and_update_best_match(self,
+                                    graph: BaseGraph[VT,ET], 
+                                    match: Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType], 
+                                    lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], 
+                                    pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType]
+                                    ) -> Tuple[Dict[Tuple[VT], MatchLcompHeuristicType], Dict[Tuple[VT,VT], MatchPivotHeuristicType]] | None:
+        """
+        Applies the given match to the graph and updates the lcomp_matches and pivot_matches dictionaries accordingly.
+        
+        Args:
+            graph (BaseGraph[VT,ET]): The graph to apply the match to.
+            match (Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]): The match to apply.
+            lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): The dictionary of lcomp matches.
+            pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): The dictionary of pivot matches.
+        
+        Returns:
+            Tuple[Dict[Tuple[VT], MatchLcompHeuristicType], Dict[Tuple[VT,VT], MatchPivotHeuristicType]] | None: The updated lcomp_matches and pivot_matches dictionaries, or None if the match cannot be applied.
+        """
+        
+        match_result = self.apply_match(graph, match)
+        if match_result is None:
+            return None
+        vertex_neighbors, removed_vertices = match_result
+        return update_matches(graph=graph, vertex_neighbors=vertex_neighbors, removed_vertices=removed_vertices, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
 
-    num_matches = len(lcomp_matches) + len(pivot_matches)
-    num_sub_branches = max(int(num_matches  ** (1/(depth+1.5))), 1) if not full_subgraphs else max(num_matches, 1)
 
-    matches = get_best_and_random_matches(n=num_sub_branches, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
-    logging.debug(f"Depth: {depth}/{lookahead}, Number of matches: {num_matches}, Number of sub-branches: {num_sub_branches}, Best result: {best_result}")
+    def full_search_match_with_best_result_at_depth(self, lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT, VT], MatchPivotHeuristicType]) -> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
+        """
+        Perform a depth-first search on the graph to find the best result at a specific depth.
 
-    for match in matches.items():
-        lookahead_graph = graph.clone()
-        lookahead_matches = apply_match(graph=lookahead_graph, match=match, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+        This function recursively explores the graph using depth-first search. When the specified depth (lookahead) is reached,
+        it applies the best match (either a local complement or a pivot) to the graph and updates the best result found so far.
+        The search explores every single path to the maximum lookahead depth.
 
-        if lookahead_matches is not None:
-            lookahead_lcomp_matches, lookahead_pivot_matches = lookahead_matches
+        Returns:
+        The best result found at the lookahead depth and the match that led to it.
+        """
+        return self._depth_search_for_best_result(graph=self.graph, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, full_subgraphs=True)
+
+    def search_match_with_best_result_at_depth(self, lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT, VT], MatchPivotHeuristicType]) -> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
+        """
+        Perform a depth-first search on the graph to find the best result at a specific depth.
+
+        This function recursively explores the graph using depth-first search. When the specified depth (lookahead) is reached,
+        it applies the best match (either a local complement or a pivot) to the graph and updates the best result found so far.
+        The search progressively narrows down the percentage of top paths it considers as it delves deeper, meaning it doesn't explore every single path to the maximum lookahead depth.
+
+        Returns:
+        The best result found at the lookahead depth and the match that led to it.
+        """
+        return self._depth_search_for_best_result(graph=self.graph, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+
+    def _depth_search_for_best_result(
+        self,
+        graph: BaseGraph[VT, ET],
+        lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType],
+        pivot_matches: Dict[Tuple[VT, VT], MatchPivotHeuristicType],
+        depth: int = 0, 
+        best_result: Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None = None,
+        current_match_dict: Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] = {},
+        full_subgraphs: bool = False
+        ) -> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
+        """
+        Perform a depth-first search on the graph to find the best result at a specific depth.
+        
+        This function recursively explores the graph using depth-first search. When the specified depth (lookahead) is reached,
+        it applies the best match (either a local complement or a pivot) to the graph and updates the best result found so far.
+        If 'full_subgraphs' is False, the search progressively narrows down the percentage of top paths it considers as it delves deeper, meaning it doesn't explore every single path to the maximum lookahead depth.
+        
+        Parameters:
+        lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): Dict of local complement matches.
+        pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): Dict of pivot matches.
+        depth (int): The current depth of the search.
+        threshold (int): Lower bound for heuristic result. I.e. -5 means any rule application which adds more than 5 Hadamard wires is filtered out
+        best_result (Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None): The best result found so far.
+        current_match_list (Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]): The current list of matches.
+        full_subgraphs (bool): Whether to consider full subgraphs or not.
+        """
+
+        if depth == self.lookahead:
+            current_results = self.get_best_match(graph=graph, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+            if not current_results or (sum([match[0] for match in current_match_dict.values()]) <= self.threshold and len(current_match_dict) > 0):
+                return best_result
+            
+            current_key, current_result = current_results
             lookahead_current_match_dict = current_match_dict.copy()
-
-            lookahead_current_match_dict[match[0]] = match[1]
+            lookahead_current_match_dict[current_key] = current_result
+            best_result = update_best_result(current_result=lookahead_current_match_dict, best_result=best_result)
             
-            current_result = _depth_search_for_best_result(
-                graph=lookahead_graph, 
-                lcomp_matches=lookahead_lcomp_matches, 
-                pivot_matches=lookahead_pivot_matches, 
-                lookahead=lookahead, 
-                apply_match=apply_match, 
-                depth=depth + 1, 
-                best_result=best_result, 
-                current_match_dict=lookahead_current_match_dict
+            # return best_result
+            return best_result if sum([match[0] for match in best_result.values()]) >= self.threshold else None
+
+        if not lcomp_matches and not pivot_matches:
+            return update_best_result(current_result=current_match_dict, best_result=best_result) if current_match_dict else best_result
+
+        num_matches = len(lcomp_matches) + len(pivot_matches)
+        num_sub_branches = max(int(num_matches  ** (1/(depth+1.5))), 1) if not full_subgraphs else max(num_matches, 1)
+
+        matches = get_best_and_random_matches(n=num_sub_branches, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+
+        for match in matches.items():
+            lookahead_graph = graph.clone()
+            lookahead_matches = self.apply_and_update_best_match(graph=lookahead_graph, match=match, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+
+            if lookahead_matches is not None:
+                lookahead_lcomp_matches, lookahead_pivot_matches = lookahead_matches
+                lookahead_current_match_dict = current_match_dict.copy()
+
+                self.reset_lookup_flow()
+                self.skipped_matches_until_reset.append(0)
+
+                lookahead_current_match_dict[match[0]] = match[1]
+                
+                current_result = self._depth_search_for_best_result(
+                    graph=lookahead_graph, 
+                    lcomp_matches=lookahead_lcomp_matches, 
+                    pivot_matches=lookahead_pivot_matches, 
+                    depth=depth + 1, 
+                    best_result=best_result, 
+                    current_match_dict=lookahead_current_match_dict
+                )
+
+                if current_result is not None:
+                    best_result = update_best_result(current_result=current_result, best_result=best_result)
+            else:
+                self.skipped_matches_until_reset[-1] += 1
+
+        logging.debug(f"Skipped {self.skipped_matches_until_reset} matches at depth {depth}")
+        logging.debug(f"Skipped {self.skipped_filter_func_evals} filter function evaluations at depth {depth}")
+        return best_result
+
+
+    def apply_and_find_new_matches(self, local_complement_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT, VT], MatchPivotHeuristicType]):
+        """
+        Apply the best match found by searching for the best result at a specific depth.
+
+        This function searches for the best result at a specific depth using depth-first search.
+        It applies the best match (either a local complement or a pivot) to the graph and updates the best result found so far.
+        """
+        best_match_dict = self.search_match_with_best_result_at_depth(lcomp_matches=local_complement_matches, pivot_matches=pivot_matches)
+
+        if best_match_dict is not None:
+            best_key, best_result = next(iter(best_match_dict.items()))
+
+            #TODO: It should not be necessary to check the filter_flow_func here
+            updated_matches = self.apply_and_update_best_match(
+                graph=self.graph,
+                match=(best_key, best_result),
+                lcomp_matches=local_complement_matches,
+                pivot_matches=pivot_matches
             )
-            
-            best_result = _update_best_result(current_result=current_result, best_result=best_result)
 
-    return best_result
+            if updated_matches is None:
+                raise Exception(f"Best match: {best_key} was found but could not be applied.")
+
+            local_complement_matches, pivot_matches = updated_matches
+
+            logging.debug(f"Applied match #{self.rule_application_count}: {best_key} with heuristic result: {best_result[0]}")
+            logging.debug(f"Found {len(local_complement_matches)} local complement matches and {len(pivot_matches)} pivot matches after applying match")
+
+            self.rule_application_count += 1
+            self.has_changes_occurred = True
+
+            flow = self.filter_flow_func(self.graph)
+
+            if not flow:
+                raise Exception("The graph is not flow-preserving after applying the match.")
+
+            self.applied_matches.append((best_key, best_result))
+
+        return local_complement_matches, pivot_matches
+
+    def greedy_wire_reduce(self):
+        self.has_changes_occurred = True
+
+        local_complement_matches = lcomp_matcher(self.graph, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
+        pivot_matches = pivot_matcher(self.graph, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
+
+        while self.has_changes_occurred:
+            self.has_changes_occurred = False
+            local_complement_matches, pivot_matches = self.apply_and_find_new_matches(local_complement_matches=local_complement_matches, pivot_matches=pivot_matches)
+
+        return self.rule_application_count, self.applied_matches
+
+
 
 def greedy_wire_reduce(
-    graph: BaseGraph[VT,ET], 
-    include_boundaries=False, 
-    include_gadgets=False, 
-    max_vertex_index=None, 
-    threshold=1, 
-    lookahead=0, 
-    quiet=True, 
-    stats=None
-    ):
-
+    graph: BaseGraph[VT, ET],
+    include_boundaries=False,
+    include_gadgets=False,
+    max_vertex_index=None,
+    threshold=0,
+    lookahead=0,
+    filter_flow_func: Callable = lambda x: True,
+    quiet=True,
+    stats=None,
+):
     """
     Perform a greedy Hadamard wire reduction on the given graph.
 
@@ -859,60 +1014,27 @@ def greedy_wire_reduce(
     include_boundaries (bool): Whether to include boundary spiders in the search for matches. Defaults to False.
     include_gadgets (bool): Whether to include non-Clifford spiders in the search for matches. Defaults to False.
     max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine. This is needed to prevent non-termination in the case of heuristic_threshold<0.
-    threshold (int): Lower bound for heuristic result. Any rule application which adds more than this number of Hadamard wires is filtered out. Defaults to 1.
+    threshold (int): Lower bound for heuristic result. Any rule application which adds more than this number of Hadamard wires is filtered out. Defaults to 0.
     lookahead (int): The number of steps to look ahead when searching for the best match. Defaults to 0.
+    filter_flow_func (Callable): A function to filter out non-flow-preserving matches. Defaults to lambda x: True.
 
     Returns:
     int: The number of rule applications, i.e., the number of iterations the function went through to simplify the graph.
     """
-    has_changes_occurred = True
-    rule_application_count = 0
+    reducer = WireReducer(
+        graph=graph,
+        include_boundaries=include_boundaries,
+        include_gadgets=include_gadgets,
+        max_vertex_index=max_vertex_index,
+        threshold=threshold,
+        lookahead=lookahead,
+        filter_flow_func=filter_flow_func,
+        quiet=quiet,
+        stats=stats,
+    )
+    return reducer.greedy_wire_reduce()
 
-    applied_matches = []
 
-    local_complement_matches = lcomp_matcher(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
-    pivot_matches = pivot_matcher(graph, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
-
-    while has_changes_occurred:
-        
-        has_changes_occurred = False
-           
-        best_match_dict = search_match_with_best_result_at_depth(
-            graph=graph, 
-            lcomp_matches=local_complement_matches, 
-            pivot_matches=pivot_matches, 
-            lookahead=lookahead, 
-            include_boundaries=include_boundaries, 
-            include_gadgets=include_gadgets
-        )
-        
-        if best_match_dict is not None:
-
-            best_key, best_result = next(iter(best_match_dict.items()))
-
-            updated_matches = apply_match(
-                graph=graph, 
-                match=(best_key, best_result), 
-                lcomp_matches=local_complement_matches, 
-                pivot_matches=pivot_matches
-            )
-
-            if updated_matches is None:
-                raise Exception(f"Best match: {best_key} was found but could not be applied.")
-            
-            local_complement_matches, pivot_matches = updated_matches
-
-            logging.debug(f"Applied match #{rule_application_count}: {best_key} with heuristic result: {best_result[0]}")
-            logging.debug(f"Found {len(local_complement_matches)} local complement matches and {len(pivot_matches)} pivot matches after applying match")
-
-            rule_application_count += 1
-            has_changes_occurred = True
-
-            
-
-            applied_matches.append((best_key, best_result))
-
-    return rule_application_count, applied_matches
 
 def random_wire_reduce(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet=True, stats=None):
     """

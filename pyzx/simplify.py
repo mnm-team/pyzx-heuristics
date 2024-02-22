@@ -219,7 +219,7 @@ def teleport_reduce(g: BaseGraph[VT,ET], quiet:bool=True, stats:Optional[Stats]=
     s.full_reduce(quiet=quiet, stats=stats)
     return s.mastergraph
 
-def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, lookahead=0, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, lookahead=0, filter_flow_func: Callable = lambda x: True, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`greedy_wire_reduce` to achieve a greedy simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -232,10 +232,16 @@ def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
     while True:
         id_simp_count = id_simp(g, quiet=quiet, stats=stats)
         spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets ,max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
+        
+        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, filter_flow_func=filter_flow_func, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
             final_matches = applied_matches
             #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
+
+        # if not filter_flow_func(g):
+        #     raise Exception("Flow function failed")
+        
+        # if greedy_wire_reduce_count == 0: break
         if id_simp_count + spider_simp_count + greedy_wire_reduce_count == 0: break
         iteration_count += 1
     return iteration_count, final_matches

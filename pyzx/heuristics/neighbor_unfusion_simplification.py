@@ -8,7 +8,7 @@ from typing import Tuple, List
 from .heuristics import PhaseType, get_phase_type, lcomp_heuristic, lcomp_heuristic_neighbor_unfusion, pivot_heuristic, pivot_heuristic_neighbor_unfusion
 from .tools import split_phases, insert_identity
 from .simplification import get_random_match
-from .gflow_calculation import update_gflow_from_double_insertion, update_gflow_from_lcomp, update_gflow_from_pivot
+from .flow_calculation import update_gflow_from_double_insertion, update_gflow_from_lcomp, update_gflow_from_pivot
 
 from pyzx.rules import apply_rule, lcomp, pivot
 from pyzx.utils import VertexType, EdgeType
