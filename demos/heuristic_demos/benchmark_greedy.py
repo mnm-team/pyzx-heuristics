@@ -1,7 +1,10 @@
 import sys; sys.path.append('../..')
+from pathlib import Path
+
+sys.path.append("c:\\Users\\wsajk\\Documents\\Arbeit\\MUNIQC-Atoms\\pyzx-heuristics")
 
 import time
-from pathlib import Path
+
 import pandas as pd
 import re
 import logging
@@ -20,7 +23,7 @@ from pyzx.optimize import Optimizer, toggle_element
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-path_to_circuits = '../../circuits/qasm/'
+path_to_circuits = 'c:\\Users\\wsajk\\Documents\\Arbeit\\MUNIQC-Atoms\\pyzx-heuristics\\circuits\\qasm\\'
 input_data = {"Name": [], "circuit": [], "graph": []}
 dataframes = []
 
@@ -34,32 +37,32 @@ times = []
 
 for file in Path(path_to_circuits).glob('*.qasm'):
     circuit = zx.Circuit.load(file).to_basic_gates()
-    if circuit.qubits <= 19 and circuit.qubits >= 8 and len(circuit.gates) <= 5000 and len(circuit.gates) >= 100:
+    # if circuit.qubits <= 19 and circuit.qubits >= 8 and len(circuit.gates) <= 5000 and len(circuit.gates) >= 100:
 
-        if not file.stem == "ham15-med":
-            try:
-                circuit = zx.optimize.basic_optimization(circuit)
-            except Exception as e:
-                pass
-            graph = circuit.to_graph()
-            graph = graph.copy()
+    if file.stem == "gf2^5_mult" or file.stem == "gf2^6_mult" or file.stem == "barenco_tof_3" or file.stem == "mod_red_21":
+        try:
+            circuit = zx.optimize.basic_optimization(circuit)
+        except Exception as e:
+            pass
+        graph = circuit.to_graph()
+        graph = graph.copy()
 
-            input_data["Name"].append(file.stem)
-            input_data["circuit"].append(circuit)
-            input_data["graph"].append(circuit.to_graph())
-            logger.info(f"Loaded {file.stem}")
-            logging.info(circuit.stats())
+        input_data["Name"].append(file.stem)
+        input_data["circuit"].append(circuit)
+        input_data["graph"].append(circuit.to_graph())
+        logger.info(f"Loaded {file.stem}")
+        logging.info(circuit.stats())
 
-            numbers = re.findall(r'\d+', circuit.stats())
+        numbers = re.findall(r'\d+', circuit.stats())
 
-            # Assign the numbers to variables
-            gates.append(int(numbers[1]))
-            t_count.append(int(numbers[2]))
-            cliffords.append(int(numbers[3]))
-            cnot.append(int(numbers[6]))
-            other.append(int(numbers[7]))
-            hadamard.append(int(numbers[8]))
-            times.append(0)
+        # Assign the numbers to variables
+        gates.append(int(numbers[1]))
+        t_count.append(int(numbers[2]))
+        cliffords.append(int(numbers[3]))
+        cnot.append(int(numbers[6]))
+        other.append(int(numbers[7]))
+        hadamard.append(int(numbers[8]))
+        times.append(0)
 
 # Define the column names
 columns = input_data["Name"]
@@ -68,8 +71,7 @@ columns = input_data["Name"]
 rows = ["Gates", "T-Count", "Cliffords", "CNOTS", "Other 2 Qubit Gates", "Hadamard", "Time"]
 
 #Define the algorithm
-algorithm = ["OR", "TR", "FR", "G0", "G1", "G2", "G3", "GN"]
-# algorithm = ["OR", "TR", "FR", "G0", "G1", "G2", "G3", "GN", "GSA", "GSAN"]
+algorithm = ["OR", "TR", "FR", "G", "GN"]
 
 data = [gates, t_count, cliffords, cnot, other, hadamard, times]
 dataframes.append(pd.DataFrame(data, columns=columns, index=rows))
@@ -226,7 +228,7 @@ def run_algorithm(algorithm, input_data, dataframes, pre_tr:bool = True):
     times = []
 
     for name, circuit, graph in zip(input_data["Name"], input_data["circuit"], input_data["graph"]):
-        graph_simplified = graph.clone()
+        graph_simplified = graph.copy()
         if pre_tr:
             graph_simplified = zx.simplify.teleport_reduce(graph_simplified)
             graph_simplified.track_phases = False
@@ -268,15 +270,10 @@ run_algorithm(zx.simplify.teleport_reduce, input_data, dataframes, pre_tr=False)
 run_algorithm(zx.simplify.full_reduce, input_data, dataframes, pre_tr=False)
 
 
-for la in range(3):
-    partial_la = partial(zx.simplify.greedy_simp, lookahead=la, threshold=0)
-    run_algorithm(partial_la, input_data, dataframes)
-
-
+partial_greedy = partial(zx.simplify.greedy_simp, lookahead=0)
+run_algorithm(partial_greedy, input_data, dataframes)
 run_algorithm(zx.simplify.greedy_simp_neighbors, input_data, dataframes)
-# run_algorithm(zx.simplify.sim_anneal_simp, input_data, dataframes)
-# run_algorithm(zx.simplify.sim_anneal_simp_neighbors, input_data, dataframes)
 
 
 df = pd.concat(dataframes, axis=0, keys=algorithm)
-df.to_csv('benchmark_greedy_la.csv')
+df.to_csv('benchmark_greedy.csv')

@@ -1,0 +1,36 @@
+,,barenco_tof_3,gf2^5_mult,gf2^6_mult,mod_red_21
+OR,Gates,56,323,465,245
+OR,T-Count,24,155,216,107
+OR,Cliffords,32,168,249,138
+OR,CNOTS,21,147,210,91
+OR,Other 2 Qubit Gates,3,7,11,14
+OR,Hadamard,6,14,22,30
+OR,Time,0,0,0,0
+TR,Gates,116,753,1079,496
+TR,T-Count,22,155,216,99
+TR,Cliffords,94,598,863,397
+TR,CNOTS,0,0,0,0
+TR,Other 2 Qubit Gates,24,154,221,105
+TR,Hadamard,66,444,636,288
+TR,Time,0,0,0,0
+FR,Gates,87,815,1307,354
+FR,T-Count,16,115,150,73
+FR,Cliffords,71,700,1157,281
+FR,CNOTS,24,60,97,63
+FR,Other 2 Qubit Gates,16,413,709,84
+FR,Hadamard,28,225,322,130
+FR,Time,0,0,0,0
+G,Gates,70,572,806,317
+G,T-Count,16,115,150,73
+G,Cliffords,54,457,656,244
+G,CNOTS,0,0,2,3
+G,Other 2 Qubit Gates,21,157,223,84
+G,Hadamard,30,270,377,147
+G,Time,0,0,0,0
+GN,Gates,70,572,801,317
+GN,T-Count,16,115,150,73
+GN,Cliffords,54,457,651,244
+GN,CNOTS,0,3,2,3
+GN,Other 2 Qubit Gates,21,156,218,84
+GN,Hadamard,30,268,377,147
+GN,Time,0,1,33,84
