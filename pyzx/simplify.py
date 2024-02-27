@@ -36,8 +36,8 @@ from .rules import *
 from .graph.base import BaseGraph, VT, ET
 from .circuit import Circuit
 
-from pyzx.heuristics.neighbor_unfusion_simplification import greedy_wire_reduce_neighbor, random_wire_reduce_neighbor, sim_annealing_reduce_neighbor
-from pyzx.heuristics.simplification import greedy_wire_reduce, random_wire_reduce, simulated_annealing_reduce
+from pyzx.heuristics.neighbor_unfusion_simplification import FilterFlowFunc, greedy_wire_reduce, greedy_wire_reduce_neighbor, random_wire_reduce_neighbor, sim_annealing_reduce_neighbor
+from pyzx.heuristics.simplification import random_wire_reduce, simulated_annealing_reduce
 
 class Stats(object):
     def __init__(self) -> None:
@@ -219,7 +219,7 @@ def teleport_reduce(g: BaseGraph[VT,ET], quiet:bool=True, stats:Optional[Stats]=
     s.full_reduce(quiet=quiet, stats=stats)
     return s.mastergraph
 
-def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, lookahead=0, filter_flow_func: Callable = lambda x: True, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def greedy_simp(g: BaseGraph[VT,ET], use_neighbor_unfusion: bool, include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`greedy_wire_reduce` to achieve a greedy simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -230,10 +230,11 @@ def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
     iteration_count = 0
     max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
     while True:
+        #TODO: test if the flow function is still valid after each simplification step
         id_simp_count = id_simp(g, quiet=quiet, stats=stats)
         spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
         
-        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, filter_flow_func=filter_flow_func, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
+        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=use_neighbor_unfusion, flow_function=flow_function, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
             final_matches = applied_matches
             #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
@@ -245,24 +246,6 @@ def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
         if id_simp_count + spider_simp_count + greedy_wire_reduce_count == 0: break
         iteration_count += 1
     return iteration_count, final_matches
-
-def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
-    """
-    This simplification procedure runs :func`greedy_wire_reduce_neighbor` to achieve a greedy simplification of the graph including neighbor unfusion.
-    The heuristic is based on the number of edges that are removed in the simplification.
-    """
-    spider_simp(g, quiet=quiet, stats=stats)
-    to_gh(g)
-    iteration_count = 0
-    max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
-    while True:
-        id_simp_count = id_simp(g, quiet=quiet, stats=stats)
-        spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-        greedy_wire_reduce_neighbor_count = greedy_wire_reduce_neighbor(g,max_vertex_index=max_vertex_index, threshold=threshold, quiet=quiet, stats=stats)
-            
-        if id_simp_count + spider_simp_count + greedy_wire_reduce_neighbor_count == 0: break
-        iteration_count += 1
-    return iteration_count
 
 def random_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """

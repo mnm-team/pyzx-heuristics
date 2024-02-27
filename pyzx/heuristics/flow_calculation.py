@@ -153,8 +153,7 @@ def update_gflow_from_pivot(graph: BaseGraph[VT,ET], pivot_vertex_1: VT, pivot_v
   Returns:
   dict: The updated gflow dictionary.
   """
-  graph_copy = GraphS()
-  graph_copy.graph = copy.deepcopy(graph.graph)
+  graph_copy = graph.clone()
 
   update_lcomp_gflow(graph_copy, pivot_vertex_1, gflow)
   calculate_lcomp(graph_copy, pivot_vertex_1)
@@ -208,8 +207,7 @@ def update_gflow_from_lcomp(graph: BaseGraph[VT,ET], lcomp_vertex: VT, gflow):
   Returns:
   dict: The updated gflow dictionary.
   """
-  graph_copy = GraphS()
-  graph_copy.graph = copy.deepcopy(graph.graph)
+  graph_copy = graph.clone()
 
   update_lcomp_gflow(graph_copy, lcomp_vertex, gflow)
 
@@ -227,7 +225,7 @@ def update_gflow_from_lcomp(graph: BaseGraph[VT,ET], lcomp_vertex: VT, gflow):
 
 Flow = Tuple[Dict[VT, Set[VT]], Dict[VT,int]]
 
-def identify_causal_flow(g: BaseGraph[VT, ET]) -> Flow:
+def cflow(g: BaseGraph[VT, ET]) -> Flow:
     solved = set(g.outputs())
     correctors = set()
     past: Dict[VT, int] = dict()
