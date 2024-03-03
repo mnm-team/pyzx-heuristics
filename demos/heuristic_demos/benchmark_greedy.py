@@ -71,7 +71,7 @@ columns = input_data["Name"]
 rows = ["Gates", "T-Count", "Cliffords", "CNOTS", "Other 2 Qubit Gates", "Hadamard", "Time"]
 
 #Define the algorithm
-algorithm = ["OR", "TR", "FR", "G", "GN"]
+algorithm = ["OR", "TR", "FR", "G0", "G1", "GN0", "GN1"]
 
 data = [gates, t_count, cliffords, cnot, other, hadamard, times]
 dataframes.append(pd.DataFrame(data, columns=columns, index=rows))
@@ -217,7 +217,7 @@ class Optimizer_no_new_cnots(Optimizer):
         else:
             raise TypeError("Unknown gate {}".format(str(g)))
 
-def run_algorithm(algorithm, input_data, dataframes, pre_tr:bool = True):
+def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool = True):
     
     gates = []
     t_count = []
@@ -232,6 +232,10 @@ def run_algorithm(algorithm, input_data, dataframes, pre_tr:bool = True):
         if pre_tr:
             graph_simplified = zx.simplify.teleport_reduce(graph_simplified)
             graph_simplified.track_phases = False
+
+
+        with open(f"graphs/{name}_{algorithm_name}.txt", 'w') as f:
+            f.write(graph_simplified.stats())
 
         logging.info(f"Running {algorithm} on {name}")
 
@@ -266,13 +270,14 @@ def run_algorithm(algorithm, input_data, dataframes, pre_tr:bool = True):
     dataframes.append(pd.DataFrame(data, columns=columns, index=rows))
 
 
-run_algorithm(zx.simplify.teleport_reduce, input_data, dataframes, pre_tr=False)
-run_algorithm(zx.simplify.full_reduce, input_data, dataframes, pre_tr=False)
+run_algorithm(zx.simplify.teleport_reduce, input_data, dataframes, algorithm_name="TR", pre_tr=False)
+run_algorithm(zx.simplify.full_reduce, input_data, dataframes, algorithm_name="FR", pre_tr=False)
 
-
-partial_greedy = partial(zx.simplify.greedy_simp, lookahead=0)
-run_algorithm(partial_greedy, input_data, dataframes)
-run_algorithm(zx.simplify.greedy_simp_neighbors, input_data, dataframes)
+for la in range(0, 2):
+    partial_greedy = partial(zx.simplify.greedy_simp, lookahead=la, use_neighbor_unfusion=False)
+    partial_greedy_neighbors = partial(zx.simplify.greedy_simp, lookahead=la, use_neighbor_unfusion=True)
+    run_algorithm(partial_greedy, input_data, dataframes, algorithm_name=f"G{la}", pre_tr=True)
+    run_algorithm(partial_greedy_neighbors, input_data, dataframes, algorithm_name=f"GN{la}", pre_tr=True)
 
 
 df = pd.concat(dataframes, axis=0, keys=algorithm)
