@@ -13,3 +13,6 @@ pyzx.egg-info
 *.ipynb_checkpoints
 pyzx/js/d3.v5.js
 *~
+
+demos/heuristic_demos/graphs/*
+demos/heuristic_demos/*.csv
