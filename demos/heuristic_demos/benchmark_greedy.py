@@ -50,7 +50,7 @@ for file in Path(path_to_circuits).glob('*.qasm'):
         input_data["Name"].append(file.stem)
         input_data["circuit"].append(circuit)
         input_data["graph"].append(circuit.to_graph())
-        logger.info(f"Loaded {file.stem}")
+        logging.info(f"Loaded {file.stem}")
         logging.info(circuit.stats())
 
         numbers = re.findall(r'\d+', circuit.stats())
@@ -242,6 +242,9 @@ def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool
         start = time.perf_counter()
         algorithm(graph_simplified)
         end = time.perf_counter() - start
+
+        with open(f"graphs/{name}_{algorithm_name}.txt", 'w') as f:
+            f.write(graph_simplified.to_graphml())
 
         logging.info(f"Finished execution in {end} seconds")
 
