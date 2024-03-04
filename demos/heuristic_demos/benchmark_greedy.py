@@ -291,11 +291,18 @@ def extract_graph(names, algorithm_name):
         logging.info(stats)
 
 
-run_algorithm(zx.simplify.teleport_reduce, input_data, dataframes, algorithm_name="TR", pre_tr=False)
-run_algorithm(zx.simplify.full_reduce, input_data, dataframes, algorithm_name="FR", pre_tr=False)
+# run_algorithm(zx.simplify.teleport_reduce, input_data, dataframes, algorithm_name="TR", pre_tr=False)
+# run_algorithm(zx.simplify.full_reduce, input_data, dataframes, algorithm_name="FR", pre_tr=False)
 
-run_algorithm(zx.simplify.greedy_simp, input_data, dataframes, algorithm_name="G", pre_tr=True)
-run_algorithm(zx.simplify.greedy_simp_neighbors, input_data, dataframes, algorithm_name="GN", pre_tr=True)
+# run_algorithm(zx.simplify.greedy_simp, input_data, dataframes, algorithm_name="G", pre_tr=True)
+# run_algorithm(zx.simplify.greedy_simp_neighbors, input_data, dataframes, algorithm_name="GN", pre_tr=True)
+
+extract_graph(input_data["Name"], "G")
+extract_graph(input_data["Name"], "G0")
+extract_graph(input_data["Name"], "G1")
+extract_graph(input_data["Name"], "GN")
+extract_graph(input_data["Name"], "GN0")
+extract_graph(input_data["Name"], "GN1")
 
 df = pd.concat(dataframes, axis=0, keys=algorithm)
 df.to_csv('benchmark_greedy.csv')
