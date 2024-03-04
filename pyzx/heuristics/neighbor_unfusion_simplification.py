@@ -324,6 +324,8 @@ def update_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_
             if neighbor_of_neighbor not in vertex_neighbors:
                 neighbors_of_neighbors.add(neighbor_of_neighbor)
 
+    # TODO: check if the following is correct
+
     lcomp_matches = update_lcomp_matches(graph=graph, 
                                          vertex_neighbors=vertex_neighbors, 
                                          removed_vertices=removed_vertices, 
@@ -383,6 +385,7 @@ def get_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex, ex
     """
     possible_unfusion_neighbours = set()
 
+    # TODO: check if the following is correct
     for neighbor in graph.neighbors(current_vertex):
         neighbors_of_neighbor = graph.neighbors(neighbor)
         if len(neighbors_of_neighbor) <= 2:
@@ -729,6 +732,7 @@ class WireReducer:
 
         #FIXME: check if this is correct
         flows = all(self._lookup_flow_for_unfusion[edge] for edge in edges)
+        self._neighbor_unfusions += 1
         self._skipped_filter_func_evals += 1
         return flows
 
