@@ -243,8 +243,8 @@ def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool
         algorithm(graph_simplified)
         end = time.perf_counter() - start
 
-        with open(f"graphs/{name}_{algorithm_name}.txt", 'w') as f:
-            f.write(graph_simplified.to_graphml())
+        with open(f"graphs/{name}_{algorithm_name}.json", 'w') as f:
+            f.write(graph_simplified.to_json())
 
         logging.info(f"Finished execution in {end} seconds")
 
@@ -271,6 +271,24 @@ def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool
 
     data = [gates, t_count, cliffords, cnot, other, hadamard, times]
     dataframes.append(pd.DataFrame(data, columns=columns, index=rows))
+
+
+def extract_graph(names, algorithm_name):
+
+    for name in names:
+        
+        with open(f"graphs/{name}_{algorithm_name}.json", 'r') as f:
+            graph_simplified = zx.Graph().from_json(f.read())
+
+        qc = zx.extract_circuit(graph_simplified)
+        try:
+            # qc = basic_optimization_min_cnots(qc.to_basic_gates())
+            qc = zx.optimize.basic_optimization(qc.to_basic_gates())
+        except Exception as e:
+            raise e
+
+        stats = qc.stats()
+        logging.info(stats)
 
 
 run_algorithm(zx.simplify.teleport_reduce, input_data, dataframes, algorithm_name="TR", pre_tr=False)
