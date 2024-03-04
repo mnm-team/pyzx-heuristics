@@ -1,9 +1,7 @@
 .mypy_cache
 local-scratchpads
 venv
-.venv
 .idea
-.vs
 notebooks/.ipynb_checkpoints
 doc/_build
 build
@@ -16,5 +14,5 @@ pyzx.egg-info
 pyzx/js/d3.v5.js
 *~
 
-
 demos/heuristic_demos/graphs/*
+demos/heuristic_demos/*.csv

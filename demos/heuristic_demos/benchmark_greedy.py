@@ -50,7 +50,7 @@ for file in Path(path_to_circuits).glob('*.qasm'):
         input_data["Name"].append(file.stem)
         input_data["circuit"].append(circuit)
         input_data["graph"].append(circuit.to_graph())
-        logger.info(f"Loaded {file.stem}")
+        logging.info(f"Loaded {file.stem}")
         logging.info(circuit.stats())
 
         numbers = re.findall(r'\d+', circuit.stats())
@@ -70,8 +70,12 @@ columns = input_data["Name"]
 # Define the row labels
 rows = ["Gates", "T-Count", "Cliffords", "CNOTS", "Other 2 Qubit Gates", "Hadamard", "Time"]
 
+lookahead = list(range(0, 3))
+
 #Define the algorithm
-algorithm = ["OR", "TR", "FR", "G0", "G1", "GN0", "GN1"]
+algorithm = ["OR", "TR", "FR"]
+algorithm = algorithm + [f"G{la}" for la in lookahead]
+algorithm = algorithm + [f"GN{la}" for la in lookahead]
 
 data = [gates, t_count, cliffords, cnot, other, hadamard, times]
 dataframes.append(pd.DataFrame(data, columns=columns, index=rows))
@@ -232,16 +236,15 @@ def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool
         if pre_tr:
             graph_simplified = zx.simplify.teleport_reduce(graph_simplified)
             graph_simplified.track_phases = False
-
-
-        with open(f"graphs/{name}_{algorithm_name}.txt", 'w') as f:
-            f.write(graph_simplified.stats())
-
+            
         logging.info(f"Running {algorithm} on {name}")
 
         start = time.perf_counter()
         algorithm(graph_simplified)
         end = time.perf_counter() - start
+
+        with open(f"graphs/{name}_{algorithm_name}.txt", 'w') as f:
+            f.write(graph_simplified.to_graphml())
 
         logging.info(f"Finished execution in {end} seconds")
 
@@ -273,7 +276,7 @@ def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool
 run_algorithm(zx.simplify.teleport_reduce, input_data, dataframes, algorithm_name="TR", pre_tr=False)
 run_algorithm(zx.simplify.full_reduce, input_data, dataframes, algorithm_name="FR", pre_tr=False)
 
-for la in range(0, 2):
+for la in lookahead:
     partial_greedy = partial(zx.simplify.greedy_simp, lookahead=la, use_neighbor_unfusion=False)
     partial_greedy_neighbors = partial(zx.simplify.greedy_simp, lookahead=la, use_neighbor_unfusion=True)
     run_algorithm(partial_greedy, input_data, dataframes, algorithm_name=f"G{la}", pre_tr=True)
