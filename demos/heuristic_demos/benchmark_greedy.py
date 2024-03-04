@@ -70,7 +70,7 @@ columns = input_data["Name"]
 # Define the row labels
 rows = ["Gates", "T-Count", "Cliffords", "CNOTS", "Other 2 Qubit Gates", "Hadamard", "Time"]
 
-lookahead = list(range(0, 3))
+lookahead = list(range(0, 2))
 
 #Define the algorithm
 algorithm = ["OR", "TR", "FR"]
@@ -243,8 +243,8 @@ def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool
         algorithm(graph_simplified)
         end = time.perf_counter() - start
 
-        with open(f"graphs/{name}_{algorithm_name}.txt", 'w') as f:
-            f.write(graph_simplified.to_graphml())
+        with open(f"graphs/{name}_{algorithm_name}.json", 'w') as f:
+            f.write(graph_simplified.to_json())
 
         logging.info(f"Finished execution in {end} seconds")
 
