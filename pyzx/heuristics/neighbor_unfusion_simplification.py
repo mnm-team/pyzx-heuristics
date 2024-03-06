@@ -9,6 +9,8 @@ import time
 from typing import Callable, Dict, Set, Tuple, List
 import warnings
 
+import numpy as np
+
 from .heuristics import PhaseType, get_phase_type, lcomp_heuristic, lcomp_heuristic_neighbor_unfusion, pivot_heuristic, pivot_heuristic_neighbor_unfusion
 from .tools import split_phases, insert_identity
 from .simplification import get_random_match
@@ -24,7 +26,7 @@ MatchLcompHeuristicType = Tuple[float, List[VT], VT]
 
 MatchPivotHeuristicType = Tuple[float, VT, VT]
 
-def check_lcomp_match(graph, vertex, include_boundaries=False, include_gadgets=False, calculate_heuristic=True) -> List[Tuple[Tuple[VT], MatchLcompHeuristicType]] | None:
+def check_lcomp_match(graph, vertex, include_boundaries=False, include_gadgets=False, check_for_unfusions = True, calculate_heuristic=True) -> List[Tuple[Tuple[VT], MatchLcompHeuristicType]] | None:
     vertex_types = graph.types()
 
     current_vertex_type = vertex_types[vertex]
@@ -33,6 +35,7 @@ def check_lcomp_match(graph, vertex, include_boundaries=False, include_gadgets=F
     if current_vertex_type != VertexType.Z: return None
     current_vertex_neighbors = list(graph.neighbors(vertex))
 
+    # TODO: implement include_gadgets
     # Check if the vertex needs to be transformed into an XZ spider
     # needs_gadget = get_phase_type(current_vertex_phase) != PhaseType.TRUE_CLIFFORD
     # Skip if gadgets are not allowed and the vertex needs to be gadgetized
@@ -69,15 +72,15 @@ def check_lcomp_match(graph, vertex, include_boundaries=False, include_gadgets=F
 
     if get_phase_type(current_vertex_phase) == PhaseType.TRUE_CLIFFORD:
         return [((vertex,), (lcomp_heuristic(graph,vertex)-boundary_count,current_vertex_neighbors,None))]
-    else:
+    elif check_for_unfusions:
         matches = []
-        for neighbor in get_possible_unfusion_neighbours(graph, vertex, None):
+        for neighbor in get_all_possible_unfusion_neighbours(graph, vertex, None):
             matches.append(((vertex,),(lcomp_heuristic_neighbor_unfusion(graph,vertex,neighbor)-boundary_count,current_vertex_neighbors,neighbor)))
         if len(matches) > 0:
             return matches
         return None
 
-def check_pivot_match(graph, edge, include_boundaries=False, include_gadgets=False, calculate_heuristic=True) -> List[Tuple[Tuple[VT, VT], MatchPivotHeuristicType]] | None:
+def check_pivot_match(graph, edge, include_boundaries=False, include_gadgets=False, check_for_unfusions=True, calculate_heuristic=True) -> List[Tuple[Tuple[VT, VT], MatchPivotHeuristicType]] | None:
     
     vertex_types = graph.types()
 
@@ -92,6 +95,7 @@ def check_pivot_match(graph, edge, include_boundaries=False, include_gadgets=Fal
     is_vertex0_not_clifford = get_phase_type(graph.phase(vertex0)) != PhaseType.CLIFFORD
     is_vertex1_not_clifford = get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD
 
+    # TODO: implement include_gadgets
     # if include_gadgets == False and (is_vertex0_not_clifford or is_vertex1_not_clifford): return None
     # Skip if both vertices are either true clifford or not clifford phase types
     # if is_vertex0_not_clifford and is_vertex1_not_clifford: return None 
@@ -131,16 +135,16 @@ def check_pivot_match(graph, edge, include_boundaries=False, include_gadgets=Fal
     if get_phase_type(graph.phase(vertex0)) == PhaseType.CLIFFORD:
         if get_phase_type(graph.phase(vertex1)) == PhaseType.CLIFFORD:
             return [((vertex0, vertex1), (pivot_heuristic(graph,edge)-boundary_count,None,None))]
-        else:
-            for neighbor in get_possible_unfusion_neighbours(graph, vertex1, vertex0):
+        elif check_for_unfusions:
+            for neighbor in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
                 matches.append(((vertex0, vertex1),(pivot_heuristic_neighbor_unfusion(graph,edge,None,neighbor)-boundary_count,None,neighbor)))
-    else:
+    elif check_for_unfusions:
         if get_phase_type(graph.phase(vertex1)) == PhaseType.CLIFFORD:
-            for neighbor in get_possible_unfusion_neighbours(graph, vertex0, vertex1):
+            for neighbor in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
                 matches.append(((vertex0, vertex1),(pivot_heuristic_neighbor_unfusion(graph,edge,neighbor,None)-boundary_count,neighbor,None)))
         else:
-            for neighbor_v0 in get_possible_unfusion_neighbours(graph, vertex0, vertex1):
-                for neighbor_v1 in get_possible_unfusion_neighbours(graph, vertex1, vertex0):
+            for neighbor_v0 in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
+                for neighbor_v1 in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
                     matches.append(((vertex0, vertex1), (pivot_heuristic_neighbor_unfusion(graph,edge,neighbor_v0,neighbor_v1)-boundary_count,neighbor_v0,neighbor_v1)))
     if len(matches) > 0:
         return matches
@@ -149,7 +153,7 @@ def check_pivot_match(graph, edge, include_boundaries=False, include_gadgets=Fal
 
 
 
-def lcomp_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, calculate_heuristic=True) -> Dict[Tuple[VT], MatchLcompHeuristicType]:
+def lcomp_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, check_for_unfusions=True, calculate_heuristic=True) -> Dict[Tuple[VT], MatchLcompHeuristicType]:
     """
     Generates all matches for local complementation in a graph-like ZX-diagram
 
@@ -157,6 +161,7 @@ def lcomp_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
     graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
     include_boundaries (bool): whether to include boundary spiders.
     include_gadgets (bool): whether to include non-Clifford spiders.
+    check_for_unfusions (bool): whether to check for unfusions.
     calculate_heuristic (bool): whether to calculate the heuristic value for each match
 
     Returns:
@@ -168,7 +173,7 @@ def lcomp_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
 
     while len(vertex_candidates) > 0:
         current_vertex = vertex_candidates.pop()
-        match_list = check_lcomp_match(graph, current_vertex, include_boundaries=include_boundaries, include_gadgets=include_gadgets, calculate_heuristic=calculate_heuristic)
+        match_list = check_lcomp_match(graph, current_vertex, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions, calculate_heuristic=calculate_heuristic)
 
         if match_list is not None:
             for match in match_list:
@@ -177,7 +182,7 @@ def lcomp_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
     
     return matches
 
-def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, calculate_heuristic=True) -> Dict[Tuple[VT,VT], MatchPivotHeuristicType]:
+def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, check_for_unfusions=True, calculate_heuristic=True) -> Dict[Tuple[VT,VT], MatchPivotHeuristicType]:
     """
     Generates all matches for pivoting in a graph-like ZX-diagram
 
@@ -185,6 +190,7 @@ def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
     graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
     include_boundaries (bool): whether to include boundary spiders.
     include_gadgets (bool): whether to include non-Clifford spiders.
+    check_for_unfusions (bool): whether to check for unfusions.
     calculate_heuristic (bool): whether to calculate the heuristic value for each match
 
     Returns:
@@ -195,7 +201,7 @@ def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
 
     while len(edge_candidates) > 0:
         edge = edge_candidates.pop()
-        match_list = check_pivot_match(graph, edge, include_boundaries=include_boundaries, include_gadgets=include_gadgets, calculate_heuristic=calculate_heuristic)
+        match_list = check_pivot_match(graph, edge, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions, calculate_heuristic=calculate_heuristic)
 
         if match_list is not None:
             for match in match_list:
@@ -206,7 +212,7 @@ def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
 
 
 
-def update_lcomp_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_vertices: Tuple[VT], lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], neighbors_of_neighbors: Set[VT], include_boundaries=False, include_gadgets=False) -> Dict[VT, MatchLcompHeuristicType]:
+def update_lcomp_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_vertices: Tuple[VT], lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], neighbors_of_neighbors: Set[VT], include_boundaries=False, include_gadgets=False, check_for_unfusions=True) -> Dict[VT, MatchLcompHeuristicType]:
     # Iterate over the current local complement matches
     lcomp_matches_copy = lcomp_matches.copy()
     keys_to_remove = set()
@@ -229,7 +235,7 @@ def update_lcomp_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], re
 
         # If the vertex is in the set of neighbors of neighbors, recalculate the heuristic
         if vertex_match in neighbors_of_neighbors:
-            new_matches = check_lcomp_match(graph, neighbor, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
+            new_matches = check_lcomp_match(graph, neighbor, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions)
             if new_matches is not None:
                 for match in new_matches:
                     match_key, match_value = match
@@ -240,7 +246,7 @@ def update_lcomp_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], re
 
     # Check for new local complement matches in the vertex neighbors
     for neighbor in vertex_neighbors:
-        new_matches = check_lcomp_match(graph, neighbor, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
+        new_matches = check_lcomp_match(graph, neighbor, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions)
         if new_matches is not None:
             for match in new_matches:
                 match_key, match_value = match
@@ -248,13 +254,14 @@ def update_lcomp_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], re
 
     return lcomp_matches_copy
 
-def update_pivot_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_vertices: Tuple[VT], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType], neighbors_of_neighbors: Set[VT], include_boundaries=False, include_gadgets=False) -> Dict[Tuple[VT,VT], MatchPivotHeuristicType]:
+def update_pivot_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_vertices: Tuple[VT], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType], neighbors_of_neighbors: Set[VT], include_boundaries=False, include_gadgets=False, check_for_unfusions=True) -> Dict[Tuple[VT,VT], MatchPivotHeuristicType]:
     
     pivot_matches_copy = pivot_matches.copy()
     keys_to_remove = set()
 
     for edge, (heuristic, neighbor1, neighbor2) in pivot_matches_copy.items():
         vertex0, vertex1 = edge
+
         if vertex0 in removed_vertices or vertex1 in removed_vertices:
             keys_to_remove.add(edge)
             continue
@@ -264,10 +271,13 @@ def update_pivot_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], re
             continue
 
         # TODO maybe remove as well wenn neighbor1 or 2 are in removed_vertices
+        if neighbor1 in removed_vertices or neighbor2 in removed_vertices:
+            keys_to_remove.add(edge)
+            continue
 
         # If the vertices are in the set of neighbors of neighbors, recalculate the heuristic
         if vertex0 in neighbors_of_neighbors or vertex1 in neighbors_of_neighbors:
-            new_matches = check_pivot_match(graph, edge, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
+            new_matches = check_pivot_match(graph, edge, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions)
             if new_matches is None:
                 keys_to_remove.add(edge)
             else:
@@ -283,7 +293,7 @@ def update_pivot_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], re
         for neighbor_of_neighbor in graph.neighbors(vertex_neighbor):
             if graph.connected(vertex_neighbor, neighbor_of_neighbor):
                 edge = graph.edge(vertex_neighbor, neighbor_of_neighbor)
-                new_matches = check_pivot_match(graph, edge, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
+                new_matches = check_pivot_match(graph, edge, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions)
                 if new_matches is not None:
                     for match in new_matches:
                         match_key, match_value = match
@@ -291,7 +301,7 @@ def update_pivot_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], re
 
     return pivot_matches_copy
 
-def update_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_vertices: Tuple[VT], lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType], include_boundaries=False, include_gadgets=False, max_vertex_index=None) -> Tuple[Dict[VT, MatchLcompHeuristicType], Dict[Tuple[VT,VT], MatchPivotHeuristicType]]:
+def update_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_vertices: Tuple[VT], lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType], include_boundaries=False, include_gadgets=False, check_for_unfusions=True, max_vertex_index=None) -> Tuple[Dict[VT, MatchLcompHeuristicType], Dict[Tuple[VT,VT], MatchPivotHeuristicType]]:
     """
     Updates the dict of local complement and pivot matches after a local complementation or pivot has been applied.
 
@@ -303,15 +313,12 @@ def update_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_
     pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): The current dict of pivot matches
     include_boundaries (bool): whether to include boundary spiders.
     include_gadgets (bool): whether to include non-Clifford spiders.
+    check_for_unfusions (bool): whether to check for unfusions.
     max_vertex_index (int, optional): The maximum vertex to consider for matches.
 
     Returns:
     Tuple[Dict[VT, MatchLcompHeuristicType], Dict[Tuple[VT,VT], MatchPivotHeuristicType]]: The updated dictonaries of local complement and pivot matches.
     """
-    # For testing purposes
-    # graph_test = graph.clone()
-    # def deep_tuple(lst):
-    #     return tuple(deep_tuple(i) if isinstance(i, list) or isinstance(i, tuple) else i for i in lst)
 
     # Initialize a set of neighbors of neighbors
     neighbors_of_neighbors = set()
@@ -324,13 +331,12 @@ def update_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_
             if neighbor_of_neighbor not in vertex_neighbors:
                 neighbors_of_neighbors.add(neighbor_of_neighbor)
 
-    # TODO: check if the following is correct
-
     lcomp_matches = update_lcomp_matches(graph=graph, 
                                          vertex_neighbors=vertex_neighbors, 
                                          removed_vertices=removed_vertices, 
                                          lcomp_matches=lcomp_matches, 
                                          neighbors_of_neighbors=neighbors_of_neighbors, 
+                                         check_for_unfusions=check_for_unfusions,
                                          include_boundaries=include_boundaries, 
                                          include_gadgets=include_gadgets)
     
@@ -339,24 +345,9 @@ def update_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_
                                          removed_vertices=removed_vertices, 
                                          pivot_matches=pivot_matches, 
                                          neighbors_of_neighbors=neighbors_of_neighbors, 
+                                         check_for_unfusions=check_for_unfusions,
                                          include_boundaries=include_boundaries, 
                                          include_gadgets=include_gadgets)
-    
-    # For testing purposes
-    # lcomp_test = lcomp_matcher(graph_test, include_boundaries=include_boundaries, include_gadgets=include_gadgets, calculate_heuristic=True)
-    # pivot_test = pivot_matcher(graph_test, include_boundaries=include_boundaries, include_gadgets=include_gadgets, calculate_heuristic=True)
-    
-    # lcomp_matches_diff = set({key : deep_tuple(value) for key, value in lcomp_matches.items()}) - set({key : deep_tuple(value) for key, value in lcomp_test.items()})
-    # lcomp_test_diff = set({key : deep_tuple(value) for key, value in lcomp_test.items()}) - set({key : deep_tuple(value) for key, value in lcomp_matches.items()})
-
-    # pivot_matches_diff = set({key : deep_tuple(value) for key, value in pivot_matches.items()}) - set({key : deep_tuple(value) for key, value in pivot_test.items()})
-    # pivot_test_diff = set({key : deep_tuple(value) for key, value in pivot_test.items()}) - set({key : deep_tuple(value) for key, value in pivot_matches.items()})
-
-    # if lcomp_matches_diff or lcomp_test_diff or pivot_matches_diff or pivot_test_diff:
-    #     raise Exception(f"lcomp_matches_diff: {lcomp_matches_diff}\n"
-    #             f"lcomp_test_diff: {lcomp_test_diff}\n"
-    #             f"pivot_matches_diff: {pivot_matches_diff}\n"
-    #             f"pivot_test_diff: {pivot_test_diff}")
 
     for match_key in list(lcomp_matches.keys()):
         if max_vertex_index and match_key[0] > max_vertex_index:
@@ -374,6 +365,7 @@ def update_matches(graph: BaseGraph[VT,ET], vertex_neighbors: List[VT], removed_
 def get_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex, exclude_vertex=None):
     """
     Get the possible neighbors for unfusion of a given vertex in a graph.
+    Only neighbors with 2 or less neighbors are considered.
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to perform the operation on.
@@ -395,6 +387,27 @@ def get_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex, ex
         possible_unfusion_neighbours.remove(exclude_vertex)
 
     return possible_unfusion_neighbours
+
+
+def get_all_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex, exclude_vertex=None):
+    """
+    Get all the possible neighbors for unfusion of a given vertex in a graph.
+
+    Parameters:
+    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+    current_vertex (VT): The vertex to find possible unfusion neighbors for.
+    exclude_vertex (VT, optional): A vertex to exclude from the possible unfusion neighbors.
+
+    Returns:
+    list: A list of vertices that are possible neighbors for unfusion.
+    """
+    possible_unfusion_neighbours = set(graph.neighbors(current_vertex))
+
+    if exclude_vertex and exclude_vertex in possible_unfusion_neighbours:
+        possible_unfusion_neighbours.remove(exclude_vertex)
+
+    return possible_unfusion_neighbours
+
 
 def unfuse_to_neighbor(graph, current_vertex, neighbor_vertex, desired_phase):
     """
@@ -423,13 +436,16 @@ def unfuse_to_neighbor(graph, current_vertex, neighbor_vertex, desired_phase):
     return (phaseless_spider, phase_spider)
 
 
-def apply_lcomp(graph: BaseGraph[VT,ET], match):
+def apply_lcomp(graph: BaseGraph[VT,ET], match) -> Tuple[VT, VT] | None:
     """
     Apply a local complementation operation to a graph.
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to perform the operation on.
     match (tuple): The match to apply the operation to.
+
+    Returns:
+    tuple: A tuple containing the added unfusion vertices.
     """
     match_key, match_value = match
     vertex = match_key[0]
@@ -438,8 +454,11 @@ def apply_lcomp(graph: BaseGraph[VT,ET], match):
 
     neighbors_copy = neighbors[:]
 
+    new_vertices = None
+
     if unfusion_neighbor:
         phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbor, Fraction(1,2))
+        new_vertices = (phaseless_spider, phase_spider)
         # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbor, phaseless_spider, phase_spider)
         neighbors_copy = [phaseless_spider if neighbor == unfusion_neighbor else neighbor for neighbor in neighbors_copy]
 
@@ -447,13 +466,18 @@ def apply_lcomp(graph: BaseGraph[VT,ET], match):
     # update_gflow_from_lcomp(graph, vertex, flow)
     apply_rule(graph, lcomp, [(vertex, neighbors_copy)])
 
-def apply_pivot(graph: BaseGraph[VT,ET], match):
+    return new_vertices
+
+def apply_pivot(graph: BaseGraph[VT,ET], match) -> Tuple[VT, ...] | None:
     """
     Apply a pivot operation to a graph.
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to perform the operation on.
     match (tuple): The match to apply the operation to.
+
+    Returns:
+    tuple: A tuple containing the added unfusion vertices.
     """
 
     match_key, match_value = match
@@ -463,9 +487,13 @@ def apply_pivot(graph: BaseGraph[VT,ET], match):
     unfusion_neighbors[vertex_1] = match_value[1]
     unfusion_neighbors[vertex_2] = match_value[2]
 
+    new_vertices = []
+
     for vertex in [vertex_1, vertex_2]:
         if unfusion_neighbors[vertex]:
             phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbors[vertex], Fraction(0,1))
+            new_vertices.append(phaseless_spider)
+            new_vertices.append(phase_spider)
             # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbors[vertex], phaseless_spider, phase_spider)
             
     # FIXME: update gflow is not correctly calculating the flow after the pivot
@@ -473,37 +501,8 @@ def apply_pivot(graph: BaseGraph[VT,ET], match):
 
     apply_rule(graph, pivot, [(vertex_1, vertex_2, [], [])])
 
+    return tuple(new_vertices) if len(new_vertices) > 0 else None
 
-
-def get_best_and_random_matches(
-    n:int, 
-    lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], 
-    pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType]
-    ) -> Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
-    """
-    Get the best and a random match out of the given matches
-
-    Parameters: 
-    n (int): The number of matches to return.
-    lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): A dict of matches for local complementation
-    pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): A dict of matches for pivoting
-
-    Returns:
-    List[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None: A list of the best and a random matches. None if no match has been applied.
-    """
-    if len(lcomp_matches) == 0 and len(pivot_matches) == 0:
-        return None
-    
-    if n <= 0:
-        raise ValueError("n must be greater than 0")
-    
-    # Sort the matches in descending order based on the heuristic result
-    match_dict = dict(sorted({**lcomp_matches, **pivot_matches}.items(), key=lambda item: item[1][0], reverse=True))
-
-    best_matches = list(match_dict.items())[:max(n//3, 1)]
-    random_matches = random.sample(list(match_dict.items())[max(n//3, 1):], n-max(n//3, 1))
-
-    return {**dict(best_matches), **dict(random_matches)}
 
 def get_best_match(local_complement_matches, pivot_matches):
     """
@@ -565,9 +564,9 @@ def apply_best_match(graph, local_complement_matches, pivot_matches, flow):
         return False
 
     if operation_type == "pivot":
-        apply_pivot(graph, pivot_matches[0], flow)
+        new_verticies = apply_pivot(graph, pivot_matches[0], flow)
     else:
-        apply_lcomp(graph, local_complement_matches[0], flow)
+        new_verticies = apply_lcomp(graph, local_complement_matches[0], flow)
 
     return True
 
@@ -587,9 +586,9 @@ def apply_random_match(graph, local_complement_matches, pivot_matches, flow):
     operation_type, match = get_random_match(local_complement_matches, pivot_matches)
 
     if operation_type == "pivot":
-        apply_pivot(graph, match, flow)
+        new_verticies = apply_pivot(graph, match, flow)
     elif operation_type == "lcomp":
-        apply_lcomp(graph, match, flow)
+        new_verticies = apply_lcomp(graph, match, flow)
     else:
         return False
 
@@ -647,13 +646,22 @@ class WireReducer:
         self.quiet = quiet
         self.stats = stats
 
-        self._rule_application_count = 0
-        self._applied_matches = []
         self._lookup_flow_for_unfusion: Dict[Tuple[VT, VT], bool] = {}
+        self._use_lookup_flow_for_unfusion = False
+
+        self._possibly_non_flow_preserving_matches = []
+
+        # For logging purposes
+        self._rule_application_count = 0
+        self._reduction_per_match = []
+        self._applied_matches = []
+        self._remaining_matches = []
         self._skipped_matches_until_reset = [0]
         self._skipped_filter_func_evals = 0
         self._neighbor_unfusions = 0
-        self._use_lookup_flow_for_unfusion = False
+        self._total_evals = 0
+        self._rehabilitated_non_flow_preserving_matches = 0
+        
 
         if self.use_neighbor_unfusion:
             self._use_lookup_flow_for_unfusion = True
@@ -670,8 +678,8 @@ class WireReducer:
     def greedy_wire_reduce(self):
         self.has_changes_occurred = True
 
-        local_complement_matches = lcomp_matcher(self.graph, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
-        pivot_matches = pivot_matcher(self.graph, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
+        local_complement_matches = lcomp_matcher(self.graph, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets, check_for_unfusions=self.use_neighbor_unfusion, calculate_heuristic=True)
+        pivot_matches = pivot_matcher(self.graph, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets, check_for_unfusions=self.use_neighbor_unfusion, calculate_heuristic=True)
 
         while self.has_changes_occurred:
             self.has_changes_occurred = False
@@ -681,8 +689,9 @@ class WireReducer:
             true_flow = self._calculate_flow(self.graph)
             if true_flow is None:
                 raise Exception("Flow is not preserved after applying the match")
-
-        return self._rule_application_count, self._applied_matches
+            
+        logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Std reduction: {np.std(self._reduction_per_match)}")
+        return sum(self._reduction_per_match), self._applied_matches
 
 
 
@@ -701,7 +710,7 @@ class WireReducer:
             bool: True if the flow is preserved, False otherwise.
         """
         if not self._use_lookup_flow_for_unfusion:
-            return self._calculate_flow(graph)
+            return self._calculate_flow(graph) is not None
 
         edges = []
         match_key, match_value = match
@@ -727,7 +736,7 @@ class WireReducer:
             if self.flow_function != FilterFlowFunc.G_FLOW_PRESERVING:
                 return self._calculate_flow(graph) is not None
             else:
-                self._skipped_filter_func_evals += 1
+                # self._skipped_filter_func_evals += 1
                 return True
 
         #FIXME: check if this is correct
@@ -738,13 +747,71 @@ class WireReducer:
 
     def _calculate_flow(self, graph: BaseGraph[VT, ET]) -> Dict[VT, Set[VT]] | None:
         if self.flow_function == FilterFlowFunc.G_FLOW_PRESERVING:
-            return self.flow_function(graph)[1]
+            return self.flow_function(graph)[1] if self.flow_function(graph) else None
         elif self.flow_function == FilterFlowFunc.C_FLOW_PRESERVING:
-            return self.flow_function(graph)
+            return self.flow_function(graph) if self.flow_function(graph) else None
         else:
             return self.flow_function(graph)
 
+    def _sort_matches(self, lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType]) -> Dict[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]:
+        """
+        Sorts the matches based on their heuristic result.
+        Puts the possibly non-flow-preserving matches at the end of the dict.
 
+        Args:
+            lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): A dict of matches for local complementation.
+            pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): A dict of matches for pivoting.
+
+        Returns:
+            Dict[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]: A sorted dict of matches.    
+        """
+        match_dict = dict(sorted({**lcomp_matches, **pivot_matches}.items(), key=lambda item: item[1][0], reverse=True))
+
+        removed_matches = set()
+
+        for (possible_non_flow_preserving_match_key, possible_non_flow_preserving_match_value) in self._possibly_non_flow_preserving_matches:
+            if possible_non_flow_preserving_match_key in match_dict:
+                del match_dict[possible_non_flow_preserving_match_key]
+                match_dict[possible_non_flow_preserving_match_key] = possible_non_flow_preserving_match_value
+                pass
+            else:
+                removed_matches.add((possible_non_flow_preserving_match_key, possible_non_flow_preserving_match_value))
+        
+        for removed_match in removed_matches:
+            self._possibly_non_flow_preserving_matches.remove(removed_match)
+
+        return match_dict
+    
+    def _get_best_and_random_matches(
+        self,
+        n:int, 
+        lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], 
+        pivot_matches: Dict[Tuple[VT,VT], MatchPivotHeuristicType]
+        ) -> Dict[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]:
+        """
+        Get the best and a random match out of the given matches
+
+        Parameters: 
+        n (int): The number of matches to return.
+        lcomp_matches (Dict[Tuple[VT], MatchLcompHeuristicType]): A dict of matches for local complementation
+        pivot_matches (Dict[Tuple[VT,VT], MatchPivotHeuristicType]): A dict of matches for pivoting
+
+        Returns:
+        Dict[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]: A dict of the best and random matches
+        """
+        if len(lcomp_matches) == 0 and len(pivot_matches) == 0:
+            return None
+        
+        if n <= 0:
+            raise ValueError("n must be greater than 0")
+        
+        # Sort the matches in descending order based on the heuristic result
+        match_dict = self._sort_matches(lcomp_matches, pivot_matches)
+
+        best_matches = list(match_dict.items())[:max(n//3, 1)]
+        random_matches = random.sample(list(match_dict.items())[max(n//3, 1):], n-max(n//3, 1))
+
+        return {**dict(best_matches), **dict(random_matches)}
 
     def _apply_best_match(
         self,
@@ -767,13 +834,15 @@ class WireReducer:
         if len(lcomp_matches) == 0 and len(pivot_matches) == 0:
             return None
         
-        match_dict = dict(sorted({**lcomp_matches, **pivot_matches}.items(), key=lambda item: item[1][0], reverse=True))
+        match_dict = self._sort_matches(lcomp_matches, pivot_matches)
 
         for match_key, match_value in match_dict.items():
             filter_graph = graph.clone()
             match_result = self._apply_match(filter_graph, (match_key, match_value))
             if match_result is not None:
+                self._total_evals += 1
                 return match_key, match_value
+            self._skipped_matches_until_reset[-1] += 1
             
         return None
 
@@ -802,18 +871,28 @@ class WireReducer:
                 for vertex_neighbor in graph.neighbors(vertex):
                     if vertex_neighbor not in match_key:
                         vertex_neighbors.add(vertex_neighbor)
-            apply_pivot(graph=graph, match=match)
+            new_verticies = apply_pivot(graph=graph, match=match)
 
         elif len(match_key) == 1:
             _, vertex_neighbors, _ = match_value
-            apply_lcomp(graph, match=match)
+            new_verticies = apply_lcomp(graph, match=match)
 
         else:
-            return None
+            raise ValueError("Match key must be a tuple of length 1 or 2")
 
         if not skip_flow_calculation:
             if not self._lookup_flow_preserving(graph, match=match):
+                if match not in self._possibly_non_flow_preserving_matches:
+                    self._possibly_non_flow_preserving_matches.append(match)
+                logging.debug(f"Match {match} is not flow-preserving")
                 return None
+        
+        if match in self._possibly_non_flow_preserving_matches:
+            self._possibly_non_flow_preserving_matches.remove(match)
+            self._rehabilitated_non_flow_preserving_matches += 1
+
+        if new_verticies:
+            vertex_neighbors = set(vertex_neighbors).union(set(new_verticies))
 
         return list(vertex_neighbors), match_key
 
@@ -879,8 +958,14 @@ class WireReducer:
             lookahead_current_match_dict[current_key] = current_result
             best_result = self._update_best_result(current_result=lookahead_current_match_dict, best_result=best_result)
             
+            match_heuristic = sum([match[0] for match in best_result.values()])
+            if match_heuristic < self.threshold:
+                logging.debug(f"Best match could not be applied at depth {depth} due to heuristic result {match_heuristic} <= {self.threshold}.")
             # return best_result
-            return best_result if sum([match[0] for match in best_result.values()]) >= self.threshold else None
+            
+            self._reset_lookup_flow()
+            self.log_data(depth)
+            return best_result if match_heuristic >= self.threshold else None
 
         if not lcomp_matches and not pivot_matches:
             return self._update_best_result(current_result=current_match_dict, best_result=best_result) if current_match_dict else best_result
@@ -888,7 +973,7 @@ class WireReducer:
         num_matches = len(lcomp_matches) + len(pivot_matches)
         num_sub_branches = max(int(num_matches  ** (1/(depth+1.5))), 1) if not full_subgraphs else max(num_matches, 1)
 
-        matches = get_best_and_random_matches(n=num_sub_branches, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+        matches = self._get_best_and_random_matches(n=num_sub_branches, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
 
         for match in matches.items():
             lookahead_graph = graph.clone()
@@ -902,7 +987,7 @@ class WireReducer:
                 # if true_flow is None:
                 #     raise Exception("Flow is not preserved after applying the match")
 
-                lookahead_lcomp_matches, lookahead_pivot_matches = update_matches(graph=lookahead_graph, vertex_neighbors=vertex_neighbors, removed_vertices=removed_vertices, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
+                lookahead_lcomp_matches, lookahead_pivot_matches = update_matches(graph=lookahead_graph, vertex_neighbors=vertex_neighbors, removed_vertices=removed_vertices, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, check_for_unfusions=self.use_neighbor_unfusion, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
                 lookahead_current_match_dict = current_match_dict.copy()
 
                 self._reset_lookup_flow()
@@ -924,10 +1009,15 @@ class WireReducer:
             else:
                 self._skipped_matches_until_reset[-1] += 1
 
+        self.log_data(depth)
+        return best_result
+
+    def log_data(self, depth):
         logging.debug(f"Skipped {self._skipped_matches_until_reset} matches at depth {depth}")
         logging.debug(f"Skipped {self._skipped_filter_func_evals} filter function evaluations at depth {depth}")
         logging.debug(f"Applied {self._neighbor_unfusions} neighbor unfusions at depth {depth}")
-        return best_result
+        logging.debug(f"Total evaluations at depth {depth}: {self._total_evals}")
+        logging.debug(f"Rehabilitated {self._rehabilitated_non_flow_preserving_matches} non flow-preserving matches at depth {depth}")
 
     def _full_search_match_with_best_result_at_depth(self, lcomp_matches: Dict[Tuple[VT], MatchLcompHeuristicType], pivot_matches: Dict[Tuple[VT, VT], MatchPivotHeuristicType]) -> Dict[Tuple, Tuple[MatchLcompHeuristicType | MatchPivotHeuristicType, Dict[VT, Set[VT]]]] | None:
         """
@@ -962,26 +1052,58 @@ class WireReducer:
         This function searches for the best result at a specific depth using depth-first search.
         It applies the best match (either a local complement or a pivot) to the graph and updates the best result found so far.
         """
-        best_match_dict = self._search_match_with_best_result_at_depth(lcomp_matches=local_complement_matches, pivot_matches=pivot_matches)
 
-        if best_match_dict is not None:
-            best_key, best_result = next(iter(best_match_dict.items()))
+        stop_search = False
 
-            match_result = self._apply_match(self.graph, (best_key, best_result), skip_flow_calculation=True)
+        # If the standard deviation over the last couple of local and pivot matches is too low, then we should stop
+        # if len(self._remaining_matches) >= 5:
+        #     last_matches = self._remaining_matches[-5:]
+        #     local_complement_results = [match[0] for match in last_matches]
+        #     pivot_results = [match[1] for match in last_matches]
+        #     if np.std(local_complement_results) < 1 and np.std(pivot_results) < 1:
+        #         self.has_changes_occurred = False
+        #         warnings.warn(f"Std of lcomp: {np.std(local_complement_results)} and pivot: {np.std(pivot_results)} is too low. Stopping.")
+        #         stop_search = True
+        #     logging.debug(f"Std of lcomp: {np.std(local_complement_results)} and pivot: {np.std(pivot_results)} of the last 5 matches")
 
-            if match_result is not None:
-                vertex_neighbors, removed_vertices = match_result
-                local_complement_matches, pivot_matches = update_matches(graph=self.graph, vertex_neighbors=vertex_neighbors, removed_vertices=removed_vertices, lcomp_matches=local_complement_matches, pivot_matches=pivot_matches, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
+        if len(self._reduction_per_match) >= 20:
+            last_matches = self._reduction_per_match[-20:]
+            if np.std(last_matches) < 0.1:
+                self.has_changes_occurred = False
+                warnings.warn(message=f"Std of reduction: {np.std(last_matches)} is too low. Stopping.")
+                stop_search = True
+            logging.debug(f"Std of reduction: {np.std(last_matches)} of the last 20 matches")
+
+        if not stop_search:
+            
+            best_match_dict = self._search_match_with_best_result_at_depth(lcomp_matches=local_complement_matches, pivot_matches=pivot_matches)
+
+            if best_match_dict is not None:
+                best_key, best_result = next(iter(best_match_dict.items()))
+
+                match_result = self._apply_match(self.graph, (best_key, best_result), skip_flow_calculation=True)
+
+                if match_result is not None:
+                    vertex_neighbors, removed_vertices = match_result
+                    local_complement_matches, pivot_matches = update_matches(graph=self.graph, vertex_neighbors=vertex_neighbors, removed_vertices=removed_vertices, lcomp_matches=local_complement_matches, pivot_matches=pivot_matches, check_for_unfusions=self.use_neighbor_unfusion, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
+                else:
+                    raise Exception(f"Best match: {best_key} was found but could not be applied.")
+
+                logging.debug(f"Applied match #{self._rule_application_count}: {best_key} with heuristic result: {best_result[0]}")
+                logging.debug(f"Found {len(local_complement_matches)} local complement matches and {len(pivot_matches)} pivot matches after applying match")
+
+                self.has_changes_occurred = True
+                self._rule_application_count += 1
+                self._reduction_per_match.append(best_result[0])
+
+                self._applied_matches.append((best_key, best_result))
+                self._remaining_matches.append((len(local_complement_matches), len(pivot_matches)))
             else:
-                raise Exception(f"Best match: {best_key} was found but could not be applied.")
-
-            logging.debug(f"Applied match #{self._rule_application_count}: {best_key} with heuristic result: {best_result[0]}")
-            logging.debug(f"Found {len(local_complement_matches)} local complement matches and {len(pivot_matches)} pivot matches after applying match")
-
-            self._rule_application_count += 1
-            self.has_changes_occurred = True
-
-            self._applied_matches.append((best_key, best_result))
+                logging.info("No more matches found")
+        
+        self._skipped_matches_until_reset = [0]
+        self._neighbor_unfusions = 0
+        self._total_evals = 0
 
         return local_complement_matches, pivot_matches
 
@@ -1151,9 +1273,9 @@ def sim_annealing_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex_index=None
             current_evaluation -= match[0]
 
             if operation == "pivot":
-                apply_pivot(graph, match, flow)
+                new_verticies = apply_pivot(graph, match, flow)
             else:
-                apply_lcomp(graph, match, flow)
+                new_verticies = apply_lcomp(graph, match, flow)
 
             if current_evaluation < best_evaluation:
                 best_graph = graph.copy()
