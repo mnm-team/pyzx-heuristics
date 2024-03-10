@@ -436,72 +436,93 @@ def unfuse_to_neighbor(graph, current_vertex, neighbor_vertex, desired_phase):
     return (phaseless_spider, phase_spider)
 
 
-def apply_lcomp(graph: BaseGraph[VT,ET], match) -> Tuple[VT, VT] | None:
-    """
-    Apply a local complementation operation to a graph.
 
-    Parameters:
-    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
-    match (tuple): The match to apply the operation to.
+def apply_pivot(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGraph, Tuple[VT, VT]], bool] = None) -> Tuple[Tuple[VT, ...], Dict[Tuple[VT, VT], bool] | None] | None:
+        """
+        Apply a pivot operation to a graph.
 
-    Returns:
-    tuple: A tuple containing the added unfusion vertices.
-    """
-    match_key, match_value = match
-    vertex = match_key[0]
-    neighbors = match_value[1]
-    unfusion_neighbor = match_value[2]
+        Parameters:
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        match (tuple): The match to apply the operation to.
+        flow_function (optinal[Callable]): A function to calculate the flow of the graph for each edge unfused.
 
-    neighbors_copy = neighbors[:]
+        Returns:
+        tuple: A tuple containing the added unfusion vertices and a dictionary storing the flow preserving attribute of each edge.
+        """
 
-    new_vertices = None
+        match_key, match_value = match
+        vertex_1, vertex_2 = match_key
 
-    if unfusion_neighbor:
-        phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbor, Fraction(1,2))
-        new_vertices = (phaseless_spider, phase_spider)
-        # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbor, phaseless_spider, phase_spider)
-        neighbors_copy = [phaseless_spider if neighbor == unfusion_neighbor else neighbor for neighbor in neighbors_copy]
+        unfusion_neighbors = {}
+        unfusion_neighbors[vertex_1] = match_value[1]
+        unfusion_neighbors[vertex_2] = match_value[2]
 
-    #TODO: check if update_gflow_from_lcomp is calculating the correct flow after the lcomp
-    # update_gflow_from_lcomp(graph, vertex, flow)
-    apply_rule(graph, lcomp, [(vertex, neighbors_copy)])
+        new_vertices = []
+        was_neighbor_unfused = False
 
-    return new_vertices
+        for vertex in [vertex_1, vertex_2]:
+            if unfusion_neighbors[vertex]:
+                phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbors[vertex], Fraction(0,1))
+                new_vertices.append(phaseless_spider)
+                new_vertices.append(phase_spider)
+                # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbors[vertex], phaseless_spider, phase_spider)
+                if flow_function:
+                    flow = {(edge := graph.edge(vertex, unfusion_neighbors[vertex])) : flow_function(graph, edge)}
+                else:
+                    flow = None
+                was_neighbor_unfused = True
+                
+        # FIXME: update gflow is not correctly calculating the flow after the pivot
+        # update_gflow_from_pivot(graph, vertex_1, vertex_2, flow)
 
-def apply_pivot(graph: BaseGraph[VT,ET], match) -> Tuple[VT, ...] | None:
-    """
-    Apply a pivot operation to a graph.
+        apply_rule(graph, pivot, [(vertex_1, vertex_2, [], [])])
 
-    Parameters:
-    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
-    match (tuple): The match to apply the operation to.
+        if was_neighbor_unfused:
+            return tuple(new_vertices), flow
+        
+        return None
 
-    Returns:
-    tuple: A tuple containing the added unfusion vertices.
-    """
+def apply_lcomp(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGraph, Tuple[VT, VT]], bool] = None) -> Tuple[Tuple[VT, VT], Dict[Tuple[VT, VT], bool] | None] | None:
+        """
+        Apply a local complementation operation to a graph.
 
-    match_key, match_value = match
-    vertex_1, vertex_2 = match_key
+        Parameters:
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        match (tuple): The match to apply the operation to.
+        flow_function (optinal[Callable]): A function to calculate the flow of the graph for each edge unfused.
 
-    unfusion_neighbors = {}
-    unfusion_neighbors[vertex_1] = match_value[1]
-    unfusion_neighbors[vertex_2] = match_value[2]
+        Returns:
+        tuple: A tuple containing the added unfusion vertices and a dictionary storing the flow preserving attribute of each edge.
+        """
+        match_key, match_value = match
+        vertex = match_key[0]
+        neighbors = match_value[1]
+        unfusion_neighbor = match_value[2]
 
-    new_vertices = []
+        neighbors_copy = neighbors[:]
 
-    for vertex in [vertex_1, vertex_2]:
-        if unfusion_neighbors[vertex]:
-            phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbors[vertex], Fraction(0,1))
-            new_vertices.append(phaseless_spider)
-            new_vertices.append(phase_spider)
-            # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbors[vertex], phaseless_spider, phase_spider)
-            
-    # FIXME: update gflow is not correctly calculating the flow after the pivot
-    # update_gflow_from_pivot(graph, vertex_1, vertex_2, flow)
+        was_neighbor_unfused = False
 
-    apply_rule(graph, pivot, [(vertex_1, vertex_2, [], [])])
+        if unfusion_neighbor:
+            phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbor, Fraction(1,2))
+            new_vertices = (phaseless_spider, phase_spider)
+            # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbor, phaseless_spider, phase_spider)
+            neighbors_copy = [phaseless_spider if neighbor == unfusion_neighbor else neighbor for neighbor in neighbors_copy]
+            if flow_function:
+                flow = {(edge := graph.edge(vertex, unfusion_neighbor)) : flow_function(graph, edge)}
+            else:
+                flow = None
+            was_neighbor_unfused = True
 
-    return tuple(new_vertices) if len(new_vertices) > 0 else None
+        #TODO: check if update_gflow_from_lcomp is calculating the correct flow after the lcomp
+        # update_gflow_from_lcomp(graph, vertex, flow)
+        apply_rule(graph, lcomp, [(vertex, neighbors_copy)])
+
+        if was_neighbor_unfused:
+            return new_vertices, flow
+
+        return None
+
 
 
 def get_best_match(local_complement_matches, pivot_matches):
@@ -564,9 +585,9 @@ def apply_best_match(graph, local_complement_matches, pivot_matches, flow):
         return False
 
     if operation_type == "pivot":
-        new_verticies = apply_pivot(graph, pivot_matches[0], flow)
+        match_result = apply_pivot(graph, pivot_matches[0])
     else:
-        new_verticies = apply_lcomp(graph, local_complement_matches[0], flow)
+        match_result = apply_lcomp(graph, local_complement_matches[0])
 
     return True
 
@@ -586,9 +607,9 @@ def apply_random_match(graph, local_complement_matches, pivot_matches, flow):
     operation_type, match = get_random_match(local_complement_matches, pivot_matches)
 
     if operation_type == "pivot":
-        new_verticies = apply_pivot(graph, match, flow)
+        match_result = apply_pivot(graph, match)
     elif operation_type == "lcomp":
-        new_verticies = apply_lcomp(graph, match, flow)
+        match_result = apply_lcomp(graph, match)
     else:
         return False
 
@@ -656,7 +677,7 @@ class WireReducer:
         self._reduction_per_match = []
         self._applied_matches = []
         self._remaining_matches = []
-        self._skipped_matches_until_reset = [0]
+        self._skipped_matches_until_reset = [0 for _ in range(lookahead+1)]
         self._skipped_filter_func_evals = 0
         self._neighbor_unfusions = 0
         self._total_evals = 0
@@ -691,12 +712,36 @@ class WireReducer:
                 raise Exception("Flow is not preserved after applying the match")
             
         logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Std reduction: {np.std(self._reduction_per_match)}")
+        logging.info(f"Total skipped filter function evaluations: {self._skipped_filter_func_evals}, Total neighbor unfusions: {self._neighbor_unfusions}, Total skipped matches: {self._skipped_matches_until_reset}")
         return sum(self._reduction_per_match), self._applied_matches
-
 
 
     def _reset_lookup_flow(self):
         self._lookup_flow_for_unfusion = {}
+
+    def _lookup_flow_preserving_for_edge(self, graph: BaseGraph[VT, ET], edge) -> bool:
+        """
+        Looks up whether the flow is preserved if neighbor unfusion is applied to a given edge.
+
+        Args:
+            graph (BaseGraph[VT, ET]): The graph to check.
+            edge (Tuple[VT, VT]): The edge to check.
+
+        Returns:
+            bool: True if the flow is preserved, False otherwise.
+        """
+        if not self._use_lookup_flow_for_unfusion:
+            return self._calculate_flow(graph) is not None
+
+        if edge not in self._lookup_flow_for_unfusion:
+            flow = self._calculate_flow(graph) is not None
+            self._neighbor_unfusions += 1
+            self._lookup_flow_for_unfusion[edge] = flow
+            return flow
+
+        self._neighbor_unfusions += 1
+        self._skipped_filter_func_evals += 1
+        return self._lookup_flow_for_unfusion[edge]
 
     def _lookup_flow_preserving(self, graph: BaseGraph[VT, ET], match) -> bool:
         """
@@ -842,7 +887,7 @@ class WireReducer:
             if match_result is not None:
                 self._total_evals += 1
                 return match_key, match_value
-            self._skipped_matches_until_reset[-1] += 1
+            self._skipped_matches_until_reset[self.lookahead] += 1
             
         return None
 
@@ -866,33 +911,40 @@ class WireReducer:
         match_key, match_value = match
         vertex_neighbors = set()
 
+        flow_function = None
+        if not skip_flow_calculation:
+            flow_function = self._lookup_flow_preserving_for_edge
+
         if len(match_key) == 2:
             for vertex in match_key:
                 for vertex_neighbor in graph.neighbors(vertex):
                     if vertex_neighbor not in match_key:
                         vertex_neighbors.add(vertex_neighbor)
-            new_verticies = apply_pivot(graph=graph, match=match)
+            match_result = apply_pivot(graph=graph, match=match, flow_function=flow_function)
 
         elif len(match_key) == 1:
             _, vertex_neighbors, _ = match_value
-            new_verticies = apply_lcomp(graph, match=match)
+            match_result = apply_lcomp(graph, match=match, flow_function=flow_function)
 
         else:
             raise ValueError("Match key must be a tuple of length 1 or 2")
+        
+        if match_result is not None:
+            new_vertices, edge_flow = match_result
 
-        if not skip_flow_calculation:
-            if not self._lookup_flow_preserving(graph, match=match):
-                if match not in self._possibly_non_flow_preserving_matches:
-                    self._possibly_non_flow_preserving_matches.append(match)
-                logging.debug(f"Match {match} is not flow-preserving")
-                return None
+            if edge_flow is not None:
+                # At least one edge is not flow-preserving
+                if not all(edge_flow.values()):
+                    if match not in self._possibly_non_flow_preserving_matches:
+                        self._possibly_non_flow_preserving_matches.append(match)
+                    logging.debug(f"Match {match} is not flow-preserving")
+                    return None
+                
+            vertex_neighbors = set(vertex_neighbors).union(set(new_vertices))
         
         if match in self._possibly_non_flow_preserving_matches:
             self._possibly_non_flow_preserving_matches.remove(match)
             self._rehabilitated_non_flow_preserving_matches += 1
-
-        if new_verticies:
-            vertex_neighbors = set(vertex_neighbors).union(set(new_verticies))
 
         return list(vertex_neighbors), match_key
 
@@ -963,7 +1015,6 @@ class WireReducer:
                 logging.debug(f"Best match could not be applied at depth {depth} due to heuristic result {match_heuristic} <= {self.threshold}.")
             # return best_result
             
-            self._reset_lookup_flow()
             self.log_data(depth)
             return best_result if match_heuristic >= self.threshold else None
 
@@ -991,7 +1042,6 @@ class WireReducer:
                 lookahead_current_match_dict = current_match_dict.copy()
 
                 self._reset_lookup_flow()
-                self._skipped_matches_until_reset.append(0)
 
                 lookahead_current_match_dict[match[0]] = match[1]
                 
@@ -1007,7 +1057,7 @@ class WireReducer:
                 if current_result is not None:
                     best_result = self._update_best_result(current_result=current_result, best_result=best_result)
             else:
-                self._skipped_matches_until_reset[-1] += 1
+                self._skipped_matches_until_reset[depth] += 1
 
         self.log_data(depth)
         return best_result
@@ -1101,8 +1151,8 @@ class WireReducer:
             else:
                 logging.info("No more matches found")
         
-        self._skipped_matches_until_reset = [0]
-        self._neighbor_unfusions = 0
+        # self._skipped_matches_until_reset = [0]
+        # self._neighbor_unfusions = 0
         self._total_evals = 0
 
         return local_complement_matches, pivot_matches
@@ -1273,9 +1323,9 @@ def sim_annealing_reduce_neighbor(graph: BaseGraph[VT,ET], max_vertex_index=None
             current_evaluation -= match[0]
 
             if operation == "pivot":
-                new_verticies = apply_pivot(graph, match, flow)
+                match_result = apply_pivot(graph, match)
             else:
-                new_verticies = apply_lcomp(graph, match, flow)
+                match_result = apply_lcomp(graph, match)
 
             if current_evaluation < best_evaluation:
                 best_graph = graph.copy()
