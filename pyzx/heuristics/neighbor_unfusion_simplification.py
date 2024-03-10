@@ -458,6 +458,7 @@ def apply_pivot(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGra
         unfusion_neighbors[vertex_2] = match_value[2]
 
         new_vertices = []
+        flow = {}
         was_neighbor_unfused = False
 
         for vertex in [vertex_1, vertex_2]:
@@ -467,7 +468,8 @@ def apply_pivot(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGra
                 new_vertices.append(phase_spider)
                 # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbors[vertex], phaseless_spider, phase_spider)
                 if flow_function:
-                    flow = {(edge := graph.edge(vertex, unfusion_neighbors[vertex])) : flow_function(graph, edge)}
+                    edge = graph.edge(vertex, unfusion_neighbors[vertex])
+                    flow[edge] = flow_function(graph, edge)
                 else:
                     flow = None
                 was_neighbor_unfused = True
