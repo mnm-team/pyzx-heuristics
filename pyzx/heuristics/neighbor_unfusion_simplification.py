@@ -656,7 +656,7 @@ class WireReducer:
         self._reduction_per_match = []
         self._applied_matches = []
         self._remaining_matches = []
-        self._skipped_matches_until_reset = [0]
+        self._skipped_matches_until_reset = [0 for _ in range(lookahead+1)]
         self._skipped_filter_func_evals = 0
         self._neighbor_unfusions = 0
         self._total_evals = 0
@@ -691,6 +691,7 @@ class WireReducer:
                 raise Exception("Flow is not preserved after applying the match")
             
         logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Std reduction: {np.std(self._reduction_per_match)}")
+        logging.info(f"Total skipped filter function evaluations: {self._skipped_filter_func_evals}, Total neighbor unfusions: {self._neighbor_unfusions}, Total skipped matches: {self._skipped_matches_until_reset}")
         return sum(self._reduction_per_match), self._applied_matches
 
 
@@ -740,10 +741,15 @@ class WireReducer:
                 return True
 
         #FIXME: check if this is correct
-        flows = all(self._lookup_flow_for_unfusion[edge] for edge in edges)
+        # flows = all(self._lookup_flow_for_unfusion[edge] for edge in edges)
+        # self._neighbor_unfusions += 1
+        # self._skipped_filter_func_evals += 1
+        # return flows
+        flow = self._calculate_flow(graph) is not None
         self._neighbor_unfusions += 1
-        self._skipped_filter_func_evals += 1
-        return flows
+        for edge in edges:
+            self._lookup_flow_for_unfusion[edge] = flow
+        return flow
 
     def _calculate_flow(self, graph: BaseGraph[VT, ET]) -> Dict[VT, Set[VT]] | None:
         if self.flow_function == FilterFlowFunc.G_FLOW_PRESERVING:
@@ -842,7 +848,7 @@ class WireReducer:
             if match_result is not None:
                 self._total_evals += 1
                 return match_key, match_value
-            self._skipped_matches_until_reset[-1] += 1
+            self._skipped_matches_until_reset[self.lookahead] += 1
             
         return None
 
@@ -963,7 +969,6 @@ class WireReducer:
                 logging.debug(f"Best match could not be applied at depth {depth} due to heuristic result {match_heuristic} <= {self.threshold}.")
             # return best_result
             
-            self._reset_lookup_flow()
             self.log_data(depth)
             return best_result if match_heuristic >= self.threshold else None
 
@@ -991,7 +996,6 @@ class WireReducer:
                 lookahead_current_match_dict = current_match_dict.copy()
 
                 self._reset_lookup_flow()
-                self._skipped_matches_until_reset.append(0)
 
                 lookahead_current_match_dict[match[0]] = match[1]
                 
@@ -1007,7 +1011,7 @@ class WireReducer:
                 if current_result is not None:
                     best_result = self._update_best_result(current_result=current_result, best_result=best_result)
             else:
-                self._skipped_matches_until_reset[-1] += 1
+                self._skipped_matches_until_reset[depth] += 1
 
         self.log_data(depth)
         return best_result
@@ -1101,8 +1105,8 @@ class WireReducer:
             else:
                 logging.info("No more matches found")
         
-        self._skipped_matches_until_reset = [0]
-        self._neighbor_unfusions = 0
+        # self._skipped_matches_until_reset = [0]
+        # self._neighbor_unfusions = 0
         self._total_evals = 0
 
         return local_complement_matches, pivot_matches
