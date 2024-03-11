@@ -86,13 +86,13 @@ def main(args):
 
     print("Applying simplification strategy ",options.simp)
     if options.simp == 'greedy':
-        simplify.greedy_simp(g, False, False, quiet=(not options.verbose), threshold=options.cap, max_v=options.maxv)
+        simplify.greedy_simp(g, quiet=(not options.verbose), threshold=options.cap, max_vertex_index=options.maxv)
     if options.simp == 'greedyn':
-        simplify.greedy_simp_neighbors(g,quiet=(not options.verbose), threshold=options.cap, max_v=options.maxv)
+        simplify.greedy_simp_neighbors(g, quiet=(not options.verbose), threshold=options.cap, max_vertex_index=options.maxv)
     if options.simp == 'random':
-        simplify.random_simp(g,False, False, quiet=(not options.verbose), threshold=options.cap, max_v=options.maxv)
+        simplify.random_simp(g, quiet=(not options.verbose), threshold=options.cap, max_vertex_index=options.maxv)
     if options.simp == 'randomn':
-        simplify.random_simp_neighbors(g, quiet=(not options.verbose), threshold=options.cap, max_v=options.maxv)
+        simplify.random_simp_neighbors(g, quiet=(not options.verbose), threshold=options.cap, max_vertex_index=options.maxv)
     if options.verbose: print("Extracting circuit...")
 
     c4 = extract.extract_circuit(g.copy())

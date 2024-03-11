@@ -277,8 +277,8 @@ run_algorithm(zx.simplify.teleport_reduce, input_data, dataframes, algorithm_nam
 run_algorithm(zx.simplify.full_reduce, input_data, dataframes, algorithm_name="FR", pre_tr=False)
 
 for la in lookahead:
-    partial_greedy = partial(zx.simplify.greedy_simp, lookahead=la, use_neighbor_unfusion=False)
-    partial_greedy_neighbors = partial(zx.simplify.greedy_simp, lookahead=la, use_neighbor_unfusion=True)
+    partial_greedy = partial(zx.simplify.greedy_simp, lookahead=la)
+    partial_greedy_neighbors = partial(zx.simplify.greedy_simp_neighbors, lookahead=la)
     run_algorithm(partial_greedy, input_data, dataframes, algorithm_name=f"G{la}", pre_tr=True)
     run_algorithm(partial_greedy_neighbors, input_data, dataframes, algorithm_name=f"GN{la}", pre_tr=True)
 

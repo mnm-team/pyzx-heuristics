@@ -6,7 +6,7 @@ if __name__ == '__main__':
 import random
 import unittest
 import pyzx as zx
-from pyzx.heuristics.neighbor_unfusion_simplification import apply_lcomp, apply_pivot, lcomp_matcher, pivot_matcher, update_matches
+from pyzx.heuristics.simplification import apply_lcomp, apply_pivot, lcomp_matcher, pivot_matcher, update_matches
 
 def deep_tuple(lst):
     return tuple(deep_tuple(i) if isinstance(i, list) or isinstance(i, tuple) else i for i in lst)
@@ -30,13 +30,14 @@ class TestUpdateMatches(unittest.TestCase):
                     for vertex_neighbor in graph.neighbors(vertex):
                         if vertex_neighbor not in match_key:
                             vertex_neighbors.add(vertex_neighbor)
-                new_verticies = apply_pivot(graph=graph, match=match)
+                match_result = apply_pivot(graph=graph, match=match)
 
             elif len(match_key) == 1:
                 _, vertex_neighbors, _ = match_value
-                new_verticies = apply_lcomp(graph=graph, match=match)
+                match_result = apply_lcomp(graph=graph, match=match)
 
-            if new_verticies:
+            if match_result:
+                new_verticies, flow = match_result
                 vertex_neighbors = set(vertex_neighbors).union(set(new_verticies))
 
             # Call the update_matches function
