@@ -6,7 +6,7 @@ if __name__ == '__main__':
 import random
 import unittest
 import pyzx as zx
-from pyzx.heuristics.neighbor_unfusion_simplification import apply_lcomp, apply_pivot, lcomp_matcher, pivot_matcher, update_matches
+from pyzx.heuristics.simplification import apply_lcomp, apply_pivot, lcomp_matcher, pivot_matcher, update_matches
 
 def deep_tuple(lst):
     return tuple(deep_tuple(i) if isinstance(i, list) or isinstance(i, tuple) else i for i in lst)
