@@ -232,7 +232,7 @@ def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool
     times = []
 
     for name, circuit, graph in zip(input_data["Name"], input_data["circuit"], input_data["graph"]):
-        graph_simplified = graph.copy()
+        graph_simplified = graph.clone()
         if pre_tr:
             graph_simplified = zx.simplify.teleport_reduce(graph_simplified)
             graph_simplified.track_phases = False
