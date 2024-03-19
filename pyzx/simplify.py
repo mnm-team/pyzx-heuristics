@@ -230,8 +230,11 @@ def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
     max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
     while True:
         #TODO: test if the flow function is still valid after each simplification step
-        id_simp_count = id_simp(g, quiet=quiet, stats=stats)
-        spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
+        id_simp_count = 0
+        spider_simp_count = 0
+        if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
+            id_simp_count = id_simp(g, quiet=quiet, stats=stats)
+            spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
         
         greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=False, flow_function=flow_function, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
@@ -258,8 +261,11 @@ def greedy_simp_neighbors(g: BaseGraph[VT,ET], include_boundaries=False, include
     max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
     while True:
         #TODO: test if the flow function is still valid after each simplification step
-        id_simp_count = id_simp(g, quiet=quiet, stats=stats)
-        spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
+        id_simp_count = 0
+        spider_simp_count = 0
+        if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
+            id_simp_count = id_simp(g, quiet=quiet, stats=stats)
+            spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
         
         greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=True, flow_function=flow_function, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
@@ -284,8 +290,11 @@ def random_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
     iteration_count = 0
     max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
     while True:
-        id_simp_count = id_simp(g, quiet=quiet, stats=stats)
-        spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
+        id_simp_count = 0
+        spider_simp_count = 0
+        if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
+            id_simp_count = id_simp(g, quiet=quiet, stats=stats)
+            spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
         random_wire_reduce_count, applied_matches = random_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets, use_neighbor_unfusion=False, max_vertex_index=max_vertex_index, lookahead=lookahead, flow_function=flow_function, threshold=threshold, quiet=quiet, stats=stats)
             
         if id_simp_count + spider_simp_count + random_wire_reduce_count == 0: break
@@ -302,8 +311,11 @@ def random_simp_neighbors(g: BaseGraph[VT,ET], include_boundaries=False, include
     iteration_count = 0
     max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
     while True:
-        id_simp_count = id_simp(g, quiet=quiet, stats=stats)
-        spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
+        id_simp_count = 0
+        spider_simp_count = 0
+        if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
+            id_simp_count = id_simp(g, quiet=quiet, stats=stats)
+            spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
         random_wire_reduce_neighbor_count, applied_matches = random_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets, use_neighbor_unfusion=True, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, flow_function=flow_function, quiet=quiet, stats=stats)
             
         if id_simp_count + spider_simp_count + random_wire_reduce_neighbor_count == 0: break
@@ -317,8 +329,11 @@ def sim_anneal_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadge
     """
     spider_simp(g, quiet=quiet, stats=stats)
     to_gh(g)
-    id_simp_count = id_simp(g, quiet=quiet, stats=stats)
-    spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
+    id_simp_count = 0
+    spider_simp_count = 0
+    if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
+        id_simp_count = id_simp(g, quiet=quiet, stats=stats)
+        spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
     simulated_annealing_reduce_count, applied_matches = sim_annealing_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, use_neighbor_unfusion=False, initial_temperature=initial_temperature, cooling_factor=cooling_factor, threshold=threshold, flow_function=flow_function, quiet=quiet, stats=stats)
     return id_simp_count + spider_simp_count + simulated_annealing_reduce_count
 
@@ -329,8 +344,11 @@ def sim_anneal_simp_neighbors(g: BaseGraph[VT,ET], include_boundaries=False, inc
     """
     spider_simp(g, quiet=quiet, stats=stats)
     to_gh(g)
-    id_simp_count = id_simp(g, quiet=quiet, stats=stats)
-    spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
+    id_simp_count = 0
+    spider_simp_count = 0
+    if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
+        id_simp_count = id_simp(g, quiet=quiet, stats=stats)
+        spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
     simulated_annealing_reduce_count, applied_matches = sim_annealing_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, use_neighbor_unfusion=True, initial_temperature=initial_temperature, cooling_factor=cooling_factor, threshold=threshold, flow_function=flow_function, quiet=quiet, stats=stats)
     return id_simp_count + spider_simp_count + simulated_annealing_reduce_count
 

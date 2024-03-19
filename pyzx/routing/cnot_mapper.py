@@ -195,6 +195,11 @@ def gauss(
         if permutation is not None:
             matrix.permute_rows(permutation)
             matrix.permute_cols(permutation)
+
+        n_qubits = len(matrix.data)
+        x = CNOT_tracker(n_qubits)
+        kwargs["x"] = x
+        kwargs["y"] = None
         steiner_gauss(matrix, architecture, **kwargs)
         try:
             len(matrix.data)
@@ -229,6 +234,7 @@ def gauss(
         # TODO - fix x and y circuits... - Needed?
         # TODO pick which gauss version was chosen
         pass
+    return x.gates
     return rank
 
 

@@ -219,7 +219,10 @@ def rec_steiner_gauss(
         pivots = list(sorted(qubit_removal_order))
         for pivot_idx, c in enumerate(pivots):
             # Get all the nodes in the row below the diagonal (rows[i:]) where the entry equals 1 or it is the diagonal
-            nodes = [r for r in pivots[pivot_idx:] if c == r or matrix.data[r][c] == 1]
+            try:
+                nodes = [r for r in pivots[pivot_idx:] if c == r or matrix.data[r][c] == 1]
+            except:
+                print("Error in rec_steiner_gauss")
             # Perform the steiner_reduce on the current column (c) with root rows2[pivot] and you can use the full matrix
             steiner_reduce(c, c, nodes, pivots[pivot_idx:], [], True)
         # Quick check upper triangular form - should never be printing!

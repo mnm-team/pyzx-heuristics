@@ -1,4 +1,6 @@
-import sys; sys.path.append('../..')
+import sys
+
+sys.path.append('../..')
 from pathlib import Path
 
 sys.path.append("c:\\Users\\wsajk\\Documents\\Arbeit\\MUNIQC-Atoms\\pyzx-heuristics")
@@ -18,6 +20,7 @@ from pyzx.circuit import Circuit
 from pyzx.circuit.gates import CZ, Gate, ZPhase
 
 from pyzx.optimize import Optimizer, toggle_element
+from pyzx.heuristics.simplification import FilterFlowFunc
 
 
 
@@ -39,7 +42,7 @@ for file in Path(path_to_circuits).glob('*.qasm'):
     circuit = zx.Circuit.load(file).to_basic_gates()
     # if circuit.qubits <= 19 and circuit.qubits >= 8 and len(circuit.gates) <= 5000 and len(circuit.gates) >= 100:
 
-    if file.stem == "gf2^5_mult" or file.stem == "gf2^6_mult" or file.stem == "barenco_tof_3" or file.stem == "mod_red_21":
+    if file.stem == "tof_10" or file.stem == "mod_red_21" or file.stem == "gf2^5_mult" or file.stem == "gf2^6_mult" or file.stem == "barenco_tof_3":
         try:
             circuit = zx.optimize.basic_optimization(circuit)
         except Exception as e:
@@ -72,10 +75,8 @@ rows = ["Gates", "T-Count", "Cliffords", "CNOTS", "Other 2 Qubit Gates", "Hadama
 
 lookahead = list(range(0, 2))
 
-#Define the algorithm
-algorithm = ["OR", "TR", "FR"]
-algorithm = algorithm + [f"G{la}" for la in lookahead]
-algorithm = algorithm + [f"GN{la}" for la in lookahead]
+# Define the algorithm
+algorithm = ["OR", "TR", "FR"] + [f"{prefix}{la}" for prefix in ["G", "GN", "G_CFlow", "GN_CFlow"] for la in lookahead]
 
 data = [gates, t_count, cliffords, cnot, other, hadamard, times]
 dataframes.append(pd.DataFrame(data, columns=columns, index=rows))
@@ -277,10 +278,14 @@ run_algorithm(zx.simplify.teleport_reduce, input_data, dataframes, algorithm_nam
 run_algorithm(zx.simplify.full_reduce, input_data, dataframes, algorithm_name="FR", pre_tr=False)
 
 for la in lookahead:
-    partial_greedy = partial(zx.simplify.greedy_simp, lookahead=la)
-    partial_greedy_neighbors = partial(zx.simplify.greedy_simp_neighbors, lookahead=la)
+    partial_greedy = partial(zx.simplify.greedy_simp, lookahead=la, threshold=1)
+    partial_greedy_neighbors = partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=1)
+    partial_greedy_cflow = partial(zx.simplify.greedy_simp, lookahead=la, threshold=1, flow_function=FilterFlowFunc.C_FLOW_PRESERVING)
+    partial_greedy_neighbors_cflow = partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=1, flow_function=FilterFlowFunc.C_FLOW_PRESERVING)
     run_algorithm(partial_greedy, input_data, dataframes, algorithm_name=f"G{la}", pre_tr=True)
     run_algorithm(partial_greedy_neighbors, input_data, dataframes, algorithm_name=f"GN{la}", pre_tr=True)
+    run_algorithm(partial_greedy_cflow, input_data, dataframes, algorithm_name=f"G_CFlow{la}", pre_tr=True)
+    run_algorithm(partial_greedy_neighbors_cflow, input_data, dataframes, algorithm_name=f"GN_CFlow{la}", pre_tr=True)
 
 
 df = pd.concat(dataframes, axis=0, keys=algorithm)

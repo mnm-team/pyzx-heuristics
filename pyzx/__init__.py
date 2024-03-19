@@ -49,6 +49,7 @@ from . import routing
 from . import local_search
 from .routing.parity_maps import CNOT_tracker
 from . import heuristics
+from . import pyquil_circuit
 
 # some common scalars
 from .graph.base import Scalar
