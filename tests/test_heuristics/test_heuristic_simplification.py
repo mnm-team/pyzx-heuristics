@@ -7,7 +7,10 @@ sys.path.append('.')
 import random
 import unittest
 import pyzx as zx
-from pyzx.heuristics.simplification import apply_lcomp, apply_pivot, lcomp_matcher, pivot_matcher, update_matches
+from pyzx.heuristics.simplification import MatchType, apply_lcomp, apply_pivot, get_match_type, lcomp_matcher, pivot_matcher, update_matches
+from pyzx.extract import extract_architecture_aware_circuit
+from pyzx.routing.architecture import create_line_architecture
+
 
 def load_graphs() -> dict[str, list]:
     path_to_circuits = 'c:\\Users\\wsajk\\Documents\\Arbeit\\MUNIQC-Atoms\\pyzx-heuristics\\circuits\\qasm\\'
@@ -34,6 +37,19 @@ def load_graphs() -> dict[str, list]:
 def deep_tuple(lst):
     return tuple(deep_tuple(i) if isinstance(i, list) or isinstance(i, tuple) else i for i in lst)
 
+def get_circuit_and_fr_graph():
+    random.seed(1349)
+    g = zx.generate.cliffordT(qubits=5, depth=50, p_t=0.3, p_cnot=0.5)
+    # c = zx.generate.phase_poly(n_qubits=16, n_phase_layers=20, cnots_per_layer=10)
+    c = zx.Circuit.from_graph(g)
+    c = zx.optimize.basic_optimization(c.split_phase_gates()).split_phase_gates()
+
+    g = c.to_graph()
+    g_tele = g.copy()
+    zx.simplify.full_reduce(g_tele)
+
+    return c, g_tele
+
 class TestHeuristics(unittest.TestCase):
 
     def test_update_matches(self):
@@ -48,17 +64,19 @@ class TestHeuristics(unittest.TestCase):
             match_key, match_values = match
             match_value = random.choice(match_values)
 
-            if len(match_key) == 2:
+            if get_match_type(match) == MatchType.PIVOT:
                 vertex_neighbors = set()
                 for vertex in match_key:
                     for vertex_neighbor in graph.neighbors(vertex):
                         if vertex_neighbor not in match_key:
                             vertex_neighbors.add(vertex_neighbor)
-                match_result = apply_pivot(graph=graph, match=(match_key, match_value))
+                match_result_with_time = apply_pivot(graph=graph, match=(match_key, match_value))
 
-            elif len(match_key) == 1:
+            elif get_match_type(match) == MatchType.LCOMP:
                 _, vertex_neighbors, _ = match_value
-                match_result = apply_lcomp(graph=graph, match=(match_key, match_value))
+                match_result_with_time = apply_lcomp(graph=graph, match=(match_key, match_value))
+
+            match_result, time_info = match_result_with_time
 
             if match_result:
                 new_verticies, flow = match_result
@@ -164,7 +182,34 @@ class TestHeuristics(unittest.TestCase):
     #             print()
     
     #             self.assertEqual(simplified_graph, graph)
+            
 
+    def test_architecture_aware_extraction(self):
+        
+        _, graph = get_circuit_and_fr_graph()
+
+        architecture = create_line_architecture(graph.qubit_count())
+        graph_simp = graph.copy()
+        new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
+
+        for gate in new_circuit.gates:
+            if gate.name == "CNOT":
+                qubit0 = gate.target
+                qubit1 = gate.control
+                if not architecture.graph.connected(qubit0, qubit1):
+                    assert False
+
+        assert True
+
+    def test_architecture_aware_extraction_correctness(self):
+        
+        circuit, graph = get_circuit_and_fr_graph()
+
+        architecture = create_line_architecture(graph.qubit_count())
+        graph_simp = graph.copy()
+        new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=False, quiet=True)
+
+        assert zx.compare_tensors(circuit, new_circuit)
 
 if __name__ == '__main__':
     unittest.main()

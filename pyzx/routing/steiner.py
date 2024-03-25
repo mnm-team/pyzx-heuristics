@@ -263,7 +263,7 @@ def rec_steiner_gauss(
                 if (
                     len(nodes) > 1
                 ):  # Otherwise it is the diagonal, which is trivial/done
-                    steiner_reduce(c, c, nodes, usable_nodes, rec_qubits, False)
+                    steiner_reduce(c, c, nodes, usable_nodes, rec_qubits, True)
 
                 # Do recursion on the recursive nodes that were allowed to break the the upper triangular form.
                 if len(rec_qubits) > 1:  # Trivial otherwise

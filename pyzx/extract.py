@@ -460,7 +460,7 @@ def apply_cnots(g: BaseGraph[VT, ET], c: Circuit, frontier: List[VT], qubit_map:
         cnots2 = cnots
         cnots = []
         for cnot in cnots2:
-            # m.row_add(cnot.target, cnot.control)
+            m.row_add(cnot.target, cnot.control)
             cnots.append(CNOT(qubit_map[frontier[cnot.control]], qubit_map[frontier[cnot.target]]))
         connectivity_from_biadj(g, m, neighbors, frontier)
 
@@ -767,12 +767,19 @@ def extract_architecture_aware_circuit(
         how far the extraction got. If you want to keep the original `g`
         then input `g.copy()` into `extract_circuit`.
     """
-    #TODO: Test if cnots are applied correctly and if the resulting circuit is correct
     def apply_cnots_with_architecture(g: BaseGraph[VT, ET], c: Circuit, frontier: List[VT], qubit_map: Dict[VT, int],
                 cnots: List[CNOT], m: Mat2, neighbors: List[VT]) -> int:
         """Adds the list of CNOTs to the circuit, modifying the graph, frontier, and qubit map as needed.
         Returns the number of vertices that end up being extracted"""
         if len(cnots) > 0:
+            cnots2 = cnots
+            cnots = []
+            for cnot in cnots2:
+                # Why is this reversed?
+                # m.row_add(cnot.target, cnot.control)
+                m.row_add(cnot.control, cnot.target)
+                cnots.append(CNOT(qubit_map[frontier[cnot.target]], qubit_map[frontier[cnot.control]]))
+                # cnots.append(CNOT(qubit_map[frontier[cnot.control]], qubit_map[frontier[cnot.target]]))
             connectivity_from_biadj(g, m, neighbors, frontier)
 
         good_verts = dict()
@@ -825,6 +832,7 @@ def extract_architecture_aware_circuit(
     
     while True:
         # preprocessing
+        # FIXME: CZ's are not placed according to the architecture
         czs_saved += clean_frontier(g, c, frontier, qubit_map, optimize_czs)
         
         # Now we can proceed with the actual extraction
@@ -834,7 +842,7 @@ def extract_architecture_aware_circuit(
             new_graph = architecture.graph.copy()
             for i in range(architecture.n_qubits - len(frontier)):
                 new_graph.remove_vertex(architecture.vertices[-(i+1)])
-            architecture = Architecture(name=architecture.name, coupling_graph=new_graph)
+            architecture = Architecture(name=architecture.name, coupling_graph=new_graph, qubit_map=[qubit_map[frontier[i]] for i in range(len(frontier))])
         
         if not frontier:
             break  # No more vertices to be processed. We are done.
@@ -854,14 +862,14 @@ def extract_architecture_aware_circuit(
             m2 = bi_adj(g, neighbors2, frontier)
 
             elim_mode = ElimMode.STEINER_MODE
+            # elim_mode = ElimMode.GAUSS_MODE
             # elim_mode = ElimMode.GENETIC_STEINER_MODE
             # print("Eliminating with genetic steiner mode")
 
-            cnots = gauss(architecture=architecture, matrix=m2, mode=elim_mode)
+            architecture = Architecture(name=architecture.name, coupling_graph=architecture.graph.copy(), qubit_map=[qubit_map[frontier[i]] for i in range(len(frontier))])
 
-
-            # cnots = m2.to_cnots(optimize=True)
-            # # Since the matrix is not square, the algorithm sometimes introduces duplicates
+            m3 = m2.copy()
+            cnots, rank = gauss(architecture=architecture, matrix=m3, mode=elim_mode, full_reduce=True)
             cnots = filter_duplicate_cnots(cnots)
 
             m = m2

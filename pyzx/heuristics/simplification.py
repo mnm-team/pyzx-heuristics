@@ -5,6 +5,7 @@ import math
 import os
 import random
 import heapq
+import time
 from tqdm import tqdm
 
 from fractions import Fraction
@@ -25,6 +26,9 @@ from pyzx.graph.base import BaseGraph, VT, ET
 
 import psutil
 
+class MatchType(Enum):
+    LCOMP = "lcomp"
+    PIVOT = "pivot"
 
 
 MatchLcompHeuristicType = Tuple[float, List[VT], VT]
@@ -409,7 +413,7 @@ def get_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex, ex
     """
     possible_unfusion_neighbours = set()
 
-    # TODO: check if the following is correct
+    # TODO: check if the following is sensible to only select glfow preserving neighbors
     for neighbor in graph.neighbors(current_vertex):
         neighbors_of_neighbor = graph.neighbors(neighbor)
         if len(neighbors_of_neighbor) <= 2:
@@ -491,29 +495,36 @@ def apply_pivot(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGra
         new_vertices = []
         flow = {}
         was_neighbor_unfused = False
-
+        time_to_unfuse = 0
+        time_to_claculate_flow = 0
         for vertex in [vertex_1, vertex_2]:
             if unfusion_neighbors[vertex]:
+                time_to_unfuse_start = time.perf_counter()
                 phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbors[vertex], Fraction(0,1))
                 new_vertices.append(phaseless_spider)
                 new_vertices.append(phase_spider)
+                time_to_unfuse += time.perf_counter() - time_to_unfuse_start
                 # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbors[vertex], phaseless_spider, phase_spider)
+                time_to_claculate_flow_start = time.perf_counter()
                 if flow_function:
                     edge = graph.edge(vertex, unfusion_neighbors[vertex])
                     flow[edge] = flow_function(graph, edge)
                 else:
                     flow = None
+                time_to_claculate_flow += time.perf_counter() - time_to_claculate_flow_start
                 was_neighbor_unfused = True
                 
         # FIXME: update gflow is not correctly calculating the flow after the pivot
         # update_gflow_from_pivot(graph, vertex_1, vertex_2, flow)
 
+        time_to_apply_rule_start = time.perf_counter()
         apply_rule(graph, pivot, [(vertex_1, vertex_2, [], [])])
+        time_to_apply_rule = time.perf_counter() - time_to_apply_rule_start
 
         if was_neighbor_unfused:
-            return tuple(new_vertices), flow
+            return (tuple(new_vertices), flow), {"time_to_unfuse": time_to_unfuse, "time_to_claculate_flow": time_to_claculate_flow, "time_to_apply_rule": time_to_apply_rule}
         
-        return None
+        return None, {"time_to_unfuse": 0, "time_to_claculate_flow": 0, "time_to_apply_rule": time_to_apply_rule}
 
 def apply_lcomp(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGraph, Tuple[VT, VT]], bool] = None) -> Tuple[Tuple[VT, VT], Dict[Tuple[VT, VT], bool] | None] | None:
         """
@@ -538,24 +549,67 @@ def apply_lcomp(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGra
         was_neighbor_unfused = False
 
         if unfusion_neighbor:
+            time_to_unfuse_start = time.perf_counter()
             phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbor, Fraction(1,2))
             new_vertices = (phaseless_spider, phase_spider)
+            time_to_unfuse = time.perf_counter() - time_to_unfuse_start
             # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbor, phaseless_spider, phase_spider)
+            time_to_claculate_flow_start = time.perf_counter()
             neighbors_copy = [phaseless_spider if neighbor == unfusion_neighbor else neighbor for neighbor in neighbors_copy]
             if flow_function:
                 flow = {(edge := graph.edge(vertex, unfusion_neighbor)) : flow_function(graph, edge)}
             else:
                 flow = None
+            time_to_claculate_flow = time.perf_counter() - time_to_claculate_flow_start
             was_neighbor_unfused = True
 
         #TODO: check if update_gflow_from_lcomp is calculating the correct flow after the lcomp
         # update_gflow_from_lcomp(graph, vertex, flow)
+        time_to_apply_rule_start = time.perf_counter()
         apply_rule(graph, lcomp, [(vertex, neighbors_copy)])
+        time_to_apply_rule = time.perf_counter() - time_to_apply_rule_start
 
         if was_neighbor_unfused:
-            return new_vertices, flow
+            return (new_vertices, flow), {"time_to_unfuse": time_to_unfuse, "time_to_claculate_flow": time_to_claculate_flow, "time_to_apply_rule": time_to_apply_rule}
 
-        return None
+        return None, {"time_to_unfuse": 0, "time_to_claculate_flow": 0, "time_to_apply_rule": time_to_apply_rule}
+
+
+def get_match_type(match: Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]) -> MatchType:
+    """
+    Get the type of a match.
+
+    Parameters:
+    match (tuple): The match to get the type of.
+
+    Returns:
+    str: The type of the match.
+    """
+    match_key, _ = match
+
+    if len(match_key) == 1:
+        return MatchType.LCOMP
+    elif len(match_key) == 2:
+        return MatchType.PIVOT
+    raise ValueError("Match key must be a tuple of length 1 or 2")
+
+def is_match_unfusing(match: Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]) -> bool | None:
+    """
+    Check if a match is unfusing.
+
+    Parameters:
+    match (tuple): The match to check.
+
+    Returns:
+    bool: True if the match is unfusing, False otherwise.
+    """
+    _, match_value = match
+
+    if get_match_type(match) == MatchType.LCOMP:
+        return match_value[-1] is not None
+    elif get_match_type(match) == MatchType.PIVOT:
+        return match_value[-1] is not None or match_value[-2] is not None
+
 
 
 class FilterFlowFunc(Enum):
@@ -622,11 +676,14 @@ class WireReducer:
         self._reduction_per_match = []
         self._applied_matches = []
         self._remaining_matches = []
-        self._skipped_matches_until_reset = [0 for _ in range(lookahead+1)]
-        self._skipped_filter_func_evals = 0
-        self._neighbor_unfusions = 0
-        self._total_evals = 0
+        self._matches = {"total matches": [0], "total unfusion matches": [0], "evaluated true": [0], "evaluated false": [0], "evaluated unfusion true": [0], "evaluated unfusion false": [0]}
+        self._neighbor_unfusions = {"total": [0], "skipped true": [0], "skipped false": [0], "evaluated true": [0], "evaluated false": [0]}
         self._rehabilitated_non_flow_preserving_matches = 0
+
+        self._time_to_apply_match = [0]
+        self._time_to_unfuse = [0]
+        self._time_to_calculate_flow = [0]
+
         
         # if self.max_vertex_index is None:
         #     self.max_vertex_index = max(self.graph.vertex_set())
@@ -642,7 +699,6 @@ class WireReducer:
         if not self.use_neighbor_unfusion and self.flow_function == FilterFlowFunc.G_FLOW_PRESERVING:
             self.flow_function = FilterFlowFunc.NONE
             warnings.warn("G-flow preserving function is not needed without neighbor unfusion. Using no flow function.")
-            
 
     def greedy_wire_reduce(self):
         self.has_changes_occurred = True
@@ -658,9 +714,12 @@ class WireReducer:
             # true_flow = self._calculate_flow(self.graph)
             # if true_flow is None:
             #     raise Exception("Flow is not preserved after applying the match")
-            
+        
+        total_matches_info = {key: sum(value) for key, value in self._matches.items()}
+        total_neighbor_unfusions_info = {key: sum(value) for key, value in self._neighbor_unfusions.items()}
         logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Std reduction: {np.std(self._reduction_per_match)}")
-        logging.info(f"Total skipped filter function evaluations: {self._skipped_filter_func_evals}, Total neighbor unfusions: {self._neighbor_unfusions}, Total skipped matches: {self._skipped_matches_until_reset}")
+        logging.info(f"Neighbor unfusions: {total_neighbor_unfusions_info}")
+        logging.info(f"Matches: {total_matches_info}")
         return sum(self._reduction_per_match), self._applied_matches
     
     def random_wire_reduce(self):
@@ -677,9 +736,12 @@ class WireReducer:
             true_flow = self._calculate_flow(self.graph)
             if true_flow is None:
                 raise Exception("Flow is not preserved after applying the match")
-            
+        
+        total_matches_info = {key: sum(value) for key, value in self._matches.items()}
+        total_neighbor_unfusions_info = {key: sum(value) for key, value in self._neighbor_unfusions.items()}
         logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Std reduction: {np.std(self._reduction_per_match)}")
-        logging.info(f"Total skipped filter function evaluations: {self._skipped_filter_func_evals}, Total neighbor unfusions: {self._neighbor_unfusions}, Total skipped matches: {self._skipped_matches_until_reset}")
+        logging.info(f"Neighbor unfusions: {total_neighbor_unfusions_info}")
+        logging.info(f"Matches: {total_matches_info}")
         return sum(self._reduction_per_match), self._applied_matches
 
 
@@ -697,15 +759,24 @@ class WireReducer:
         Returns:
             bool: True if the flow is preserved, False otherwise.
         """
-        self._neighbor_unfusions += 1
 
+        self._neighbor_unfusions["total"][-1] += 1
+        
         if edge not in self._lookup_flow_for_unfusion:
             flow = self._calculate_flow(graph) is not None
             self._lookup_flow_for_unfusion[edge] = flow
+            if flow is True:
+                self._neighbor_unfusions["evaluated true"][-1] += 1
+            else:
+                self._neighbor_unfusions["evaluated false"][-1] += 1
             return flow
 
-        self._skipped_filter_func_evals += 1
-        return self._lookup_flow_for_unfusion[edge]
+        flow = self._lookup_flow_for_unfusion[edge]
+        if flow is True:
+            self._neighbor_unfusions["skipped true"][-1] += 1
+        else:
+            self._neighbor_unfusions["skipped false"][-1] += 1
+        return flow
 
     def _lookup_flow_preserving(self, graph: BaseGraph[VT, ET], match) -> bool:
         """
@@ -724,34 +795,41 @@ class WireReducer:
         edges = []
         match_key, match_value = match
 
-        if len(match_key) == 1:
+        if get_match_type(match) == MatchType.LCOMP:
             vertex = match_key[0]
             unfusion_neighbor = match_value[2]
             if unfuse_to_neighbor and unfusion_neighbor:
                 edges.append(graph.edge(vertex, unfusion_neighbor))
 
-        elif len(match_key) == 2:
+        elif get_match_type(match) == MatchType.PIVOT:
             unfusion_neighbors = {vertex: match_value[i+1] for i, vertex in enumerate(match_key)}
             edges.extend(graph.edge(vertex, unfusion_neighbors[vertex]) for vertex in match_key if unfusion_neighbors[vertex])
 
         if not all(edge in self._lookup_flow_for_unfusion for edge in edges):
             flow = self._calculate_flow(graph) is not None
-            self._neighbor_unfusions += 1
+            # self._neighbor_unfusions["total"][-1] += 1
+            # if flow is True:
+            #     self._neighbor_unfusions["evaluated true"][-1] += 1
+            # else:
+            #     self._neighbor_unfusions["evaluated false"][-1] += 1
             for edge in edges:
                 self._lookup_flow_for_unfusion[edge] = flow
             return flow
 
+        # if no unfusion is applied, the g flow is allready preserved
         if len(edges) == 0:
             if self.flow_function != FilterFlowFunc.G_FLOW_PRESERVING:
                 return self._calculate_flow(graph) is not None
             else:
-                # self._skipped_filter_func_evals += 1
                 return True
 
         #FIXME: check if this is correct
         flows = all(self._lookup_flow_for_unfusion[edge] for edge in edges)
-        self._neighbor_unfusions += 1
-        self._skipped_filter_func_evals += 1
+        # self._neighbor_unfusions["total"][-1] += 1
+        # if flow is True:
+        #     self._neighbor_unfusions["skipped true"][-1] += 1
+        # else:
+        #     self._neighbor_unfusions["skipped false"][-1] += 1
         return flows
 
     def _calculate_flow(self, graph: BaseGraph[VT, ET]) -> Dict[VT, Set[VT]] | None:
@@ -941,10 +1019,8 @@ class WireReducer:
             filter_graph = graph.clone()
             match_result = self._apply_match(filter_graph, (match_key, match_value))
             if match_result is not None:
-                self._total_evals += 1
                 return match_key, match_value
-            self._skipped_matches_until_reset[self.lookahead] += 1
-            
+
         return None
 
     def _apply_random_match(
@@ -974,9 +1050,7 @@ class WireReducer:
             filter_graph = graph.clone()
             match_result = self._apply_match(filter_graph, (match_key, match_value))
             if match_result is not None:
-                self._total_evals += 1
                 return match_key, match_value
-            self._skipped_matches_until_reset[self.lookahead] += 1
             
         return None
     
@@ -1002,15 +1076,18 @@ class WireReducer:
 
         flow_function = self._lookup_flow_preserving_for_edge if not skip_flow_calculation and self.use_neighbor_unfusion else None
 
-        if len(match_key) == 2:
+        if get_match_type(match) == MatchType.PIVOT:
             vertex_neighbors = {vertex_neighbor for vertex in match_key for vertex_neighbor in graph.neighbors(vertex) if vertex_neighbor not in match_key}
-            match_result = apply_pivot(graph=graph, match=match, flow_function=flow_function)
-        elif len(match_key) == 1:
+            match_result_with_time = apply_pivot(graph=graph, match=match, flow_function=flow_function)
+        elif get_match_type(match) == MatchType.LCOMP:
             _, vertex_neighbors, _ = match_value
-            match_result = apply_lcomp(graph, match=match, flow_function=flow_function)
-        else:
-            raise ValueError("Match key must be a tuple of length 1 or 2")
-            
+            match_result_with_time = apply_lcomp(graph, match=match, flow_function=flow_function)
+        
+        match_result, time_info = match_result_with_time
+        self._time_to_apply_match[-1] += time_info["time_to_apply_rule"]
+        self._time_to_unfuse[-1] += time_info["time_to_unfuse"]
+        self._time_to_calculate_flow[-1] += time_info["time_to_claculate_flow"]
+
         if match_result is not None:
             new_vertices, edge_flow = match_result
 
@@ -1019,22 +1096,34 @@ class WireReducer:
                 if match not in self._possibly_non_flow_preserving_matches:
                     self._possibly_non_flow_preserving_matches.append(match)
                 not_flow_preserving_edges = [edge for edge in edge_flow if not edge_flow[edge]]
-                logging.debug(f"Edges {not_flow_preserving_edges} are not flow-preserving")
+                # logging.debug(f"Edges {not_flow_preserving_edges} are not flow-preserving")
+                self._matches["evaluated unfusion false"][-1] += 1
+                self._matches["total unfusion matches"][-1] += 1
                 return None
                     
             vertex_neighbors = set(vertex_neighbors).union(set(new_vertices))
 
         else:
             # If no unfusion was applied check if the match is flow-preserving
-            if not skip_flow_calculation and not self.use_neighbor_unfusion and self._calculate_flow(graph) is None:
+            if not skip_flow_calculation and self._calculate_flow(graph) is None:
                 if match not in self._possibly_non_flow_preserving_matches:
                     self._possibly_non_flow_preserving_matches.append(match)
-                logging.debug(f"Match {match} is not flow-preserving")
+                # logging.debug(f"Match {match} is not flow-preserving")
+                self._matches["evaluated false"][-1] += 1
+                self._matches["total matches"][-1] += 1
                 return None
             
         if match in self._possibly_non_flow_preserving_matches:
             self._possibly_non_flow_preserving_matches.remove(match)
             self._rehabilitated_non_flow_preserving_matches += 1
+
+        if not skip_flow_calculation:
+            if is_match_unfusing(match):
+                self._matches["evaluated unfusion true"][-1] += 1
+                self._matches["total unfusion matches"][-1] += 1
+            else:
+                self._matches["evaluated true"][-1] += 1
+                self._matches["total matches"][-1] += 1
 
         return list(vertex_neighbors), match_key
 
@@ -1106,7 +1195,9 @@ class WireReducer:
         """
 
         if depth == self.lookahead:
+            # t = time.perf_counter()
             current_results = apply_match_method(graph=graph, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
+            # self._time_to_apply_match[-1] += time.perf_counter() - t
             if not current_results:
                 return best_result
             
@@ -1131,9 +1222,6 @@ class WireReducer:
             return self._update_best_result(current_result=current_match_list, best_result=best_result) if current_match_list else best_result
 
         num_matches = sum([len(match_list) for match_list in lcomp_matches.values()]) + sum([len(match_list) for match_list in pivot_matches.values()])
-        
-        if num_matches <= 0:
-            print("No matches found")
         
         num_sub_branches = max(int(num_matches  ** (1/(depth+2))), 1) if not full_subgraphs else max(num_matches, 1)
 
@@ -1176,18 +1264,19 @@ class WireReducer:
 
                 if current_result is not None:
                     best_result = self._update_best_result(current_result=current_result, best_result=best_result)
-            else:
-                self._skipped_matches_until_reset[depth] += 1
 
-        self._log_data(depth)
+        self._log_data()
         return best_result
 
-    def _log_data(self, depth):
-        logging.debug(f"Skipped {self._skipped_matches_until_reset} matches at depth {depth}")
-        logging.debug(f"Skipped {self._skipped_filter_func_evals} filter function evaluations at depth {depth}")
-        logging.debug(f"Applied {self._neighbor_unfusions} neighbor unfusions at depth {depth}")
-        logging.debug(f"Total evaluations at depth {depth}: {self._total_evals}")
-        logging.debug(f"Rehabilitated {self._rehabilitated_non_flow_preserving_matches} non flow-preserving matches at depth {depth}")
+    def _log_data(self):
+        current_match_info = {key: values[-1] for key, values in self._matches.items()}
+        current_neighbor_unfusions = {key: values[-1] for key, values in self._neighbor_unfusions.items()}
+        logging.debug(f"Current Neighbor unfusions {current_neighbor_unfusions}")
+        logging.debug(f"Current Matches {current_match_info}")
+        logging.debug(f"Current Time to apply match {self._time_to_apply_match[-1]}")
+        logging.debug(f"Current Time to unfuse {self._time_to_unfuse[-1]}")
+        logging.debug(f"Current Time to calculate flow {self._time_to_calculate_flow[-1]}")
+        logging.debug(f"Rehabilitated {self._rehabilitated_non_flow_preserving_matches} non flow-preserving matches")
 
     def _full_search_match_with_best_result_at_depth(self, graph, lcomp_matches: Dict[Tuple[VT], List[MatchLcompHeuristicType]], pivot_matches: Dict[Tuple[VT, VT], List[MatchPivotHeuristicType]]) -> Dict[Tuple, List[MatchLcompHeuristicType | MatchPivotHeuristicType]] | None:
         """
@@ -1306,12 +1395,22 @@ class WireReducer:
                     self._rule_application_count += 1
                     self._reduction_per_match.append(best_result[0])
 
+
                     self._applied_matches.append((best_key, best_result))
                     self._remaining_matches.append((len(lcomp_matches), len(pivot_matches)))
 
                     logging.info(f"Applied match #{self._rule_application_count}: {best_key}, {best_result}")
                     logging.debug(f"Found {len(lcomp_matches)} local complement matches and {len(pivot_matches)} pivot matches after applying match")
                 
+                for key in self._matches.keys():
+                    self._matches[key].append(0)
+                for key in self._neighbor_unfusions.keys():
+                    self._neighbor_unfusions[key].append(0)
+                
+                self._time_to_apply_match.append(0)
+                self._time_to_unfuse.append(0)
+                self._time_to_calculate_flow.append(0)
+
                 pid = os.getpid()
                 python_process = psutil.Process(pid)
                 memoryUse = python_process.memory_info()[0]/2.**30  # memory use in GB...I think
@@ -1320,10 +1419,6 @@ class WireReducer:
 
             else:
                 logging.info("No more matches found")
-        
-        # self._skipped_matches_until_reset = [0]
-        # self._neighbor_unfusions = 0
-        self._total_evals = 0
 
         return lcomp_matches, pivot_matches
 
@@ -1550,15 +1645,15 @@ def _apply_match(
     match_key, match_value = match
     vertex_neighbors = set()
 
-    if len(match_key) == 2:
+    if get_match_type(match) == MatchType.PIVOT:
         vertex_neighbors = {vertex_neighbor for vertex in match_key for vertex_neighbor in graph.neighbors(vertex) if vertex_neighbor not in match_key}
-        match_result = apply_pivot(graph=graph, match=match)
-    elif len(match_key) == 1:
+        match_result_with_time = apply_pivot(graph=graph, match=match)
+    elif get_match_type(match) == MatchType.LCOMP:
         _, vertex_neighbors, _ = match_value
-        match_result = apply_lcomp(graph, match=match)
-    else:
-        raise ValueError("Match key must be a tuple of length 1 or 2")
+        match_result_with_time = apply_lcomp(graph, match=match)
     
+    match_result, time_info = match_result_with_time
+
     if match_result is not None:
         new_vertices, _ = match_result
         

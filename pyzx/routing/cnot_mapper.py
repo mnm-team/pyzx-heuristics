@@ -4,6 +4,7 @@ from enum import Enum
 from typing import List, Optional, Tuple
 
 from pyzx.circuit import Circuit
+from pyzx.circuit.gates import Gate
 
 from ..linalg import Mat2
 from .architecture import (
@@ -142,7 +143,7 @@ def gauss(
     permutation: Optional[List[int]] = None,
     try_transpose: bool = False,
     **kwargs,
-) -> int:
+) -> Tuple[List[Gate], int]:
     """
     Performs architecture-aware Gaussian Elimination on a matrix.
 
@@ -185,6 +186,10 @@ def gauss(
             #    if old_y != None: old_y.col_add(t, c)
             # return rank
         else:
+            n_qubits = len(matrix.data)
+            x = CNOT_tracker(n_qubits)
+            kwargs["x"] = x
+            kwargs["y"] = None
             rank = matrix.gauss(**kwargs)
     elif mode == ElimMode.STEINER_MODE:
         if architecture is None:
@@ -234,8 +239,7 @@ def gauss(
         # TODO - fix x and y circuits... - Needed?
         # TODO pick which gauss version was chosen
         pass
-    return x.gates
-    return rank
+    return (x.gates, rank)
 
 
 def permuted_gauss(
