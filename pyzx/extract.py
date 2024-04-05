@@ -673,7 +673,10 @@ def extract_circuit(
     
     while True:
         # preprocessing
-        czs_saved += clean_frontier(g, c, frontier, qubit_map, optimize_czs)
+        try:
+            czs_saved += clean_frontier(g, c, frontier, qubit_map, optimize_czs)
+        except Exception as e:
+            if not quiet: print("Failed to clean frontier:", e)
         
         # Now we can proceed with the actual extraction
         # First make sure that frontier is connected in correct way to inputs

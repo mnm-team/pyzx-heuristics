@@ -218,7 +218,7 @@ def teleport_reduce(g: BaseGraph[VT,ET], quiet:bool=True, stats:Optional[Stats]=
     s.full_reduce(quiet=quiet, stats=stats)
     return s.mastergraph
 
-def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`greedy_wire_reduce` to achieve a greedy simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -236,7 +236,7 @@ def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
             id_simp_count = id_simp(g, quiet=quiet, stats=stats)
             spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
         
-        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=False, flow_function=flow_function, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
+        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=False, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
             final_matches = applied_matches
             #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
@@ -249,7 +249,7 @@ def greedy_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
         iteration_count += 1
     return iteration_count, final_matches
 
-def greedy_simp_neighbors(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`greedy_wire_reduce` to achieve a greedy simplification of the graph including neighbor unfusion.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -267,7 +267,7 @@ def greedy_simp_neighbors(g: BaseGraph[VT,ET], include_boundaries=False, include
             id_simp_count = id_simp(g, quiet=quiet, stats=stats)
             spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
         
-        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=True, flow_function=flow_function, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
+        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=True, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
             final_matches = applied_matches
             #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
@@ -280,7 +280,7 @@ def greedy_simp_neighbors(g: BaseGraph[VT,ET], include_boundaries=False, include
         iteration_count += 1
     return iteration_count, final_matches
 
-def random_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def random_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`random_wire_reduce` to achieve a random simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -295,13 +295,13 @@ def random_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=F
         if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
             id_simp_count = id_simp(g, quiet=quiet, stats=stats)
             spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-        random_wire_reduce_count, applied_matches = random_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets, use_neighbor_unfusion=False, max_vertex_index=max_vertex_index, lookahead=lookahead, flow_function=flow_function, threshold=threshold, quiet=quiet, stats=stats)
+        random_wire_reduce_count, applied_matches = random_wire_reduce(g, use_neighbor_unfusion=False, max_vertex_index=max_vertex_index, lookahead=lookahead, flow_function=flow_function, threshold=threshold, quiet=quiet, stats=stats)
             
         if id_simp_count + spider_simp_count + random_wire_reduce_count == 0: break
         iteration_count += 1
     return iteration_count
 
-def random_simp_neighbors(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def random_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`random_wire_reduce` to achieve a random simplification of the graph including neighbor unfusion.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -316,13 +316,13 @@ def random_simp_neighbors(g: BaseGraph[VT,ET], include_boundaries=False, include
         if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
             id_simp_count = id_simp(g, quiet=quiet, stats=stats)
             spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-        random_wire_reduce_neighbor_count, applied_matches = random_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets, use_neighbor_unfusion=True, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, flow_function=flow_function, quiet=quiet, stats=stats)
+        random_wire_reduce_neighbor_count, applied_matches = random_wire_reduce(g, use_neighbor_unfusion=True, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, flow_function=flow_function, quiet=quiet, stats=stats)
             
         if id_simp_count + spider_simp_count + random_wire_reduce_neighbor_count == 0: break
         iteration_count += 1
     return iteration_count
 
-def sim_anneal_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index= None, initial_temperature = 100, cooling_factor=0.95, threshold=1, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def sim_anneal_simp(g: BaseGraph[VT,ET], max_vertex_index= None, initial_temperature = 100, cooling_factor=0.95, threshold=1, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`sim_annealing_wire_reduce` to achieve a simulated annealing simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -334,10 +334,10 @@ def sim_anneal_simp(g: BaseGraph[VT,ET], include_boundaries=False, include_gadge
     if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
         id_simp_count = id_simp(g, quiet=quiet, stats=stats)
         spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-    simulated_annealing_reduce_count, applied_matches = sim_annealing_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, use_neighbor_unfusion=False, initial_temperature=initial_temperature, cooling_factor=cooling_factor, threshold=threshold, flow_function=flow_function, quiet=quiet, stats=stats)
+    simulated_annealing_reduce_count, applied_matches = sim_annealing_wire_reduce(g, max_vertex_index=max_vertex_index, use_neighbor_unfusion=False, initial_temperature=initial_temperature, cooling_factor=cooling_factor, threshold=threshold, flow_function=flow_function, quiet=quiet, stats=stats)
     return id_simp_count + spider_simp_count + simulated_annealing_reduce_count
 
-def sim_anneal_simp_neighbors(g: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, max_vertex_index=None, initial_temperature=100, cooling_factor=0.95, threshold=-10000, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def sim_anneal_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, initial_temperature=100, cooling_factor=0.95, threshold=-10000, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`sim_annealing_wire_reduce` to achieve a simulated annealing simplification of the graph including neighbor unfusion.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -349,7 +349,7 @@ def sim_anneal_simp_neighbors(g: BaseGraph[VT,ET], include_boundaries=False, inc
     if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
         id_simp_count = id_simp(g, quiet=quiet, stats=stats)
         spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-    simulated_annealing_reduce_count, applied_matches = sim_annealing_wire_reduce(g, include_boundaries=include_boundaries, include_gadgets=include_gadgets, max_vertex_index=max_vertex_index, use_neighbor_unfusion=True, initial_temperature=initial_temperature, cooling_factor=cooling_factor, threshold=threshold, flow_function=flow_function, quiet=quiet, stats=stats)
+    simulated_annealing_reduce_count, applied_matches = sim_annealing_wire_reduce(g, max_vertex_index=max_vertex_index, use_neighbor_unfusion=True, initial_temperature=initial_temperature, cooling_factor=cooling_factor, threshold=threshold, flow_function=flow_function, quiet=quiet, stats=stats)
     return id_simp_count + spider_simp_count + simulated_annealing_reduce_count
 
 

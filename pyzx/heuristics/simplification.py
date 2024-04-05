@@ -35,7 +35,23 @@ MatchLcompHeuristicType = Tuple[float, List[VT], VT]
 
 MatchPivotHeuristicType = Tuple[float, VT, VT]
 
-def check_lcomp_match(graph, vertex, include_boundaries=False, include_gadgets=False, check_for_unfusions = True, calculate_heuristic=True) -> Tuple[Tuple[VT], List[MatchLcompHeuristicType]] | None:
+def is_vertex_next_to_boundary(graph, vertex):
+    """
+    Check if a vertex is next to a boundary in a graph.
+
+    Parameters:
+    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+    vertex (VT): The vertex to check.
+
+    Returns:
+    bool: True if the vertex is next to a boundary, False otherwise.
+    """
+    for neighbor in graph.neighbors(vertex):
+        if graph.type(neighbor) != VertexType.Z:
+            return True
+    return False
+
+def check_lcomp_match(graph, vertex, check_for_unfusions = True, calculate_heuristic=True) -> Tuple[Tuple[VT], List[MatchLcompHeuristicType]] | None:
     vertex_types = graph.types()
 
     current_vertex_type = vertex_types[vertex]
@@ -44,11 +60,8 @@ def check_lcomp_match(graph, vertex, include_boundaries=False, include_gadgets=F
     if current_vertex_type != VertexType.Z: return None
     current_vertex_neighbors = list(graph.neighbors(vertex))
 
-    # TODO: implement include_gadgets
     # Check if the vertex needs to be transformed into an XZ spider
     # needs_gadget = get_phase_type(current_vertex_phase) != PhaseType.TRUE_CLIFFORD
-    # Skip if gadgets are not allowed and the vertex needs to be gadgetized
-    # if include_gadgets == False and needs_gadget: return None
     # Skip if the vertex has only one neighbor (i.e., it's a leaf node)
     if len(graph.neighbors(vertex)) == 1: return None
             
@@ -60,13 +73,13 @@ def check_lcomp_match(graph, vertex, include_boundaries=False, include_gadgets=F
     boundary_count = 0
     for neighbor in current_vertex_neighbors:
         # Check if the neighbor is a leaf node and the vertex needs to be gadgetized
-        if len(graph.neighbors(neighbor)) == 1 and get_phase_type(current_vertex_phase) != PhaseType.TRUE_CLIFFORD:
-            is_already_gadget = True
+        # if len(graph.neighbors(neighbor)) == 1 and get_phase_type(current_vertex_phase) != PhaseType.TRUE_CLIFFORD:
+        #     is_already_gadget = True
         if vertex_types[neighbor] != VertexType.Z:
             boundary_count += 1
 
     # if is_already_gadget and needs_gadget: return None
-    if not include_boundaries and boundary_count > 0: return None
+    if boundary_count > 0: return None
 
     if not calculate_heuristic:
         return ((vertex,), (0,current_vertex_neighbors,0))
@@ -75,9 +88,6 @@ def check_lcomp_match(graph, vertex, include_boundaries=False, include_gadgets=F
 
     if not calculate_heuristic:
         return (vertex,), [(0,current_vertex_neighbors,None)]
-    
-    if not include_boundaries:
-        boundary_count = 0
 
     matches = []
     if get_phase_type(current_vertex_phase) == PhaseType.TRUE_CLIFFORD:
@@ -85,12 +95,12 @@ def check_lcomp_match(graph, vertex, include_boundaries=False, include_gadgets=F
     elif check_for_unfusions:
         for neighbor in get_all_possible_unfusion_neighbours(graph, vertex, None):
             matches.append((lcomp_heuristic_neighbor_unfusion(graph,vertex,neighbor)-boundary_count,current_vertex_neighbors,neighbor))
-    
+
     if len(matches) > 0:
         return (vertex,), matches
     return None
 
-def check_pivot_match(graph, edge, include_boundaries=False, include_gadgets=False, check_for_unfusions=True, calculate_heuristic=True) -> Tuple[Tuple[VT, VT], List[MatchPivotHeuristicType]] | None:
+def check_pivot_match(graph, edge, check_for_unfusions=True, calculate_heuristic=True) -> Tuple[Tuple[VT, VT], List[MatchPivotHeuristicType]] | None:
     
     vertex_types = graph.types()
 
@@ -102,13 +112,9 @@ def check_pivot_match(graph, edge, include_boundaries=False, include_gadgets=Fal
 
     if not (vertex_types[vertex0] == VertexType.Z and vertex_types[vertex1] == VertexType.Z): return None
     
-    is_vertex0_not_clifford = get_phase_type(graph.phase(vertex0)) != PhaseType.CLIFFORD
-    is_vertex1_not_clifford = get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD
+    vertex0_needs_gadget = get_phase_type(graph.phase(vertex0)) != PhaseType.CLIFFORD
+    vertex1_needs_gadget = get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD
 
-    # TODO: implement include_gadgets
-    # if include_gadgets == False and (is_vertex0_not_clifford or is_vertex1_not_clifford): return None
-    # Skip if both vertices are either true clifford or not clifford phase types
-    # if is_vertex0_not_clifford and is_vertex1_not_clifford: return None 
     # Skip if the vertices have only one neighbor (i.e., they are leaf nodes)
     if len(graph.neighbors(vertex0)) == 1 or len(graph.neighbors(vertex1)) == 1: return None 
 
@@ -117,29 +123,26 @@ def check_pivot_match(graph, edge, include_boundaries=False, include_gadgets=Fal
     boundary_count = 0
 
     for neighbor in graph.neighbors(vertex0):
-        if vertex_types[neighbor] != VertexType.Z: 
+        if vertex_types[neighbor] != VertexType.Z:
             boundary_count += 1
 
         # Set the flag if the neighbor is a root of a second phase gadget
-        if len(graph.neighbors(neighbor)) == 1 and get_phase_type(graph.phases()[vertex0]) != PhaseType.CLIFFORD: 
+        if len(graph.neighbors(neighbor)) == 1 and get_phase_type(graph.phase(vertex0)) != PhaseType.CLIFFORD: 
             vertex0_already_gadget = True
 
     for neighbor in graph.neighbors(vertex1):
-        if vertex_types[neighbor] != VertexType.Z: 
+        if vertex_types[neighbor] != VertexType.Z:
             boundary_count += 1
 
         # Set the flag if the neighbor is a root of a second phase gadget
-        if len(graph.neighbors(neighbor)) == 1 and get_phase_type(graph.phases()[vertex1]) != PhaseType.CLIFFORD: 
+        if len(graph.neighbors(neighbor)) == 1 and get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD: 
             vertex1_already_gadget = True
 
-    # if (vertex0_already_gadget and is_vertex0_not_clifford) or (vertex1_already_gadget and is_vertex1_not_clifford): return None
-    if not include_boundaries and boundary_count > 0: return None
+    if (vertex0_already_gadget and vertex0_needs_gadget) or (vertex1_already_gadget and vertex1_needs_gadget): return None
+    if boundary_count > 1: return None
 
     if not calculate_heuristic:
         return (vertex0, vertex1), [(0, None, None)]
-    
-    if not include_boundaries:
-        boundary_count = 0
 
     matches = []
     if get_phase_type(graph.phase(vertex0)) == PhaseType.CLIFFORD:
@@ -147,16 +150,34 @@ def check_pivot_match(graph, edge, include_boundaries=False, include_gadgets=Fal
             return (vertex0, vertex1), [(pivot_heuristic(graph,edge)-boundary_count,None,None)]
         
         elif check_for_unfusions:
+            # Neighbor unfusion at vertex 1
             for neighbor in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
                 matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,None,neighbor)-boundary_count,None,neighbor))
+
+        # else:
+            # Phase gadget unfusion at vertex 1
+            if not is_vertex_next_to_boundary(graph, vertex0) and not is_vertex_next_to_boundary(graph, vertex1):
+                matches.append((pivot_heuristic(graph,edge)-boundary_count,None,-1))
+        
     elif check_for_unfusions:
         if get_phase_type(graph.phase(vertex1)) == PhaseType.CLIFFORD:
+            # Neighbor unfusion at vertex 0
             for neighbor in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
                 matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor,None)-boundary_count,neighbor,None))
+            # Phase gadget unfusion at vertex 0
+            if not is_vertex_next_to_boundary(graph, vertex0) and not is_vertex_next_to_boundary(graph, vertex1):
+                matches.append((pivot_heuristic(graph,edge)-boundary_count,-1, None))
         else:
+            # Neighbor unfusion at both vertices
             for neighbor_v0 in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
                 for neighbor_v1 in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
                     matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor_v0,neighbor_v1)-boundary_count,neighbor_v0,neighbor_v1))
+    
+    # else:
+    #     if get_phase_type(graph.phase(vertex1)) == PhaseType.CLIFFORD:
+    #         if not is_vertex_next_to_boundary(graph, vertex0) and not is_vertex_next_to_boundary(graph, vertex1):
+    #             matches.append((pivot_heuristic(graph,edge)-boundary_count,-1, None))
+
     if len(matches) > 0:
         return (vertex0, vertex1), matches
     return None
@@ -164,14 +185,12 @@ def check_pivot_match(graph, edge, include_boundaries=False, include_gadgets=Fal
 
 
 
-def lcomp_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, check_for_unfusions=True, calculate_heuristic=True) -> Dict[Tuple[VT], List[MatchLcompHeuristicType]]:
+def lcomp_matcher(graph: BaseGraph[VT,ET], check_for_unfusions=True, calculate_heuristic=True) -> Dict[Tuple[VT], List[MatchLcompHeuristicType]]:
     """
     Generates all matches for local complementation in a graph-like ZX-diagram
 
     Parameters: 
     graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-    include_boundaries (bool): whether to include boundary spiders.
-    include_gadgets (bool): whether to include non-Clifford spiders.
     check_for_unfusions (bool): whether to check for unfusions.
     calculate_heuristic (bool): whether to calculate the heuristic value for each match
 
@@ -184,7 +203,7 @@ def lcomp_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
 
     while len(vertex_candidates) > 0:
         current_vertex = vertex_candidates.pop()
-        match = check_lcomp_match(graph, current_vertex, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions, calculate_heuristic=calculate_heuristic)
+        match = check_lcomp_match(graph, current_vertex, check_for_unfusions=check_for_unfusions, calculate_heuristic=calculate_heuristic)
 
         if match is not None:
             match_key, match_values = match
@@ -192,14 +211,14 @@ def lcomp_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
     
     return matches
 
-def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gadgets=False, check_for_unfusions=True, calculate_heuristic=True) -> Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]:
+def pivot_matcher(graph: BaseGraph[VT,ET], check_for_unfusions=True, calculate_heuristic=True) -> Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]:
     """
     Generates all matches for pivoting in a graph-like ZX-diagram
 
     Parameters: 
     graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-    include_boundaries (bool): whether to include boundary spiders.
-    include_gadgets (bool): whether to include non-Clifford spiders.
+
+
     check_for_unfusions (bool): whether to check for unfusions.
     calculate_heuristic (bool): whether to calculate the heuristic value for each match
 
@@ -211,7 +230,8 @@ def pivot_matcher(graph: BaseGraph[VT,ET], include_boundaries=False, include_gad
 
     while len(edge_candidates) > 0:
         edge = edge_candidates.pop()
-        match = check_pivot_match(graph, edge, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions, calculate_heuristic=calculate_heuristic)
+
+        match = check_pivot_match(graph, edge, check_for_unfusions=check_for_unfusions, calculate_heuristic=calculate_heuristic)
 
         if match is not None:
             match_key, match_values = match
@@ -226,9 +246,8 @@ def update_lcomp_matches(
         vertex_neighbors: List[VT], 
         removed_vertices: Tuple[VT], 
         lcomp_matches: Dict[Tuple[VT], List[MatchLcompHeuristicType]], 
-        neighbors_of_neighbors: Set[VT], 
-        include_boundaries=False, 
-        include_gadgets=False, check_for_unfusions=True
+        neighbors_of_neighbors: Set[VT],
+        check_for_unfusions=True
         ) -> Dict[Tuple[VT], List[MatchLcompHeuristicType]]:
     
     # Iterate over the current local complement matches
@@ -243,7 +262,7 @@ def update_lcomp_matches(
 
         if any(element in match_values[0][1] for element in removed_vertices):
             
-            new_match = check_lcomp_match(graph, vertex_match[0], include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions)
+            new_match = check_lcomp_match(graph, vertex_match[0], check_for_unfusions=check_for_unfusions)
             if new_match is None:
                 keys_to_remove.add((vertex_match, None))
             else:
@@ -253,7 +272,7 @@ def update_lcomp_matches(
 
         # If the vertex is in the set of neighbors of neighbors, recalculate the heuristic
         if vertex_match[0] in neighbors_of_neighbors:
-            new_match = check_lcomp_match(graph, vertex_match[0], include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions)
+            new_match = check_lcomp_match(graph, vertex_match[0], check_for_unfusions=check_for_unfusions)
             if new_match is not None:
                 match_key, match_values = new_match
                 lcomp_matches_copy[match_key] = match_values
@@ -268,7 +287,7 @@ def update_lcomp_matches(
 
     # Check for new local complement matches in the vertex neighbors
     for neighbor in vertex_neighbors:
-        new_match = check_lcomp_match(graph, neighbor, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions)
+        new_match = check_lcomp_match(graph, neighbor, check_for_unfusions=check_for_unfusions)
         if new_match is not None:
             match_key, match_values = new_match
             lcomp_matches_copy[match_key] = match_values
@@ -280,9 +299,7 @@ def update_pivot_matches(
         vertex_neighbors: List[VT], 
         removed_vertices: Tuple[VT], 
         pivot_matches: Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]], 
-        neighbors_of_neighbors: Set[VT], 
-        include_boundaries=False, 
-        include_gadgets=False, 
+        neighbors_of_neighbors: Set[VT],
         check_for_unfusions=True
         ) -> Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]:
     
@@ -303,7 +320,7 @@ def update_pivot_matches(
 
         # If the vertices are in the set of neighbors of neighbors, recalculate the heuristic
         if vertex0 in neighbors_of_neighbors or vertex1 in neighbors_of_neighbors:
-            new_match = check_pivot_match(graph, edge, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions)
+            new_match = check_pivot_match(graph, edge, check_for_unfusions=check_for_unfusions)
             if new_match is None:
                 keys_to_remove.add((edge, None))
             else:
@@ -321,7 +338,7 @@ def update_pivot_matches(
         for neighbor_of_neighbor in graph.neighbors(vertex_neighbor):
             if graph.connected(vertex_neighbor, neighbor_of_neighbor):
                 edge = graph.edge(vertex_neighbor, neighbor_of_neighbor)
-                new_match = check_pivot_match(graph, edge, include_boundaries=include_boundaries, include_gadgets=include_gadgets, check_for_unfusions=check_for_unfusions)
+                new_match = check_pivot_match(graph, edge, check_for_unfusions=check_for_unfusions)
                 if new_match is not None:
                     match_key, match_values = new_match
                     pivot_matches_copy[match_key] = match_values
@@ -333,9 +350,7 @@ def update_matches(
         vertex_neighbors: List[VT], 
         removed_vertices: Tuple[VT], 
         lcomp_matches: Dict[Tuple[VT], List[MatchLcompHeuristicType]], 
-        pivot_matches: Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]], 
-        include_boundaries=False, 
-        include_gadgets=False, 
+        pivot_matches: Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]],
         check_for_unfusions=True, 
         max_vertex_index=None
         ) -> Tuple[Dict[Tuple[VT], List[MatchLcompHeuristicType]], Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]]:
@@ -348,8 +363,6 @@ def update_matches(
     removed_vertices (Tuple[VT]): The vertices that were removed by the local complementation or pivot
     lcomp_matches (Dict[Tuple[VT], List[MatchLcompHeuristicType]]): The current dict of local complement matches
     pivot_matches (Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]): The current dict of pivot matches
-    include_boundaries (bool): whether to include boundary spiders.
-    include_gadgets (bool): whether to include non-Clifford spiders.
     check_for_unfusions (bool): whether to check for unfusions.
     max_vertex_index (int, optional): The maximum vertex to consider for matches.
 
@@ -373,18 +386,16 @@ def update_matches(
                                          removed_vertices=removed_vertices, 
                                          lcomp_matches=lcomp_matches, 
                                          neighbors_of_neighbors=neighbors_of_neighbors, 
-                                         check_for_unfusions=check_for_unfusions,
-                                         include_boundaries=include_boundaries, 
-                                         include_gadgets=include_gadgets)
+                                         check_for_unfusions=check_for_unfusions
+                                         )
     
     pivot_matches = update_pivot_matches(graph=graph, 
                                          vertex_neighbors=vertex_neighbors, 
                                          removed_vertices=removed_vertices, 
                                          pivot_matches=pivot_matches, 
                                          neighbors_of_neighbors=neighbors_of_neighbors, 
-                                         check_for_unfusions=check_for_unfusions,
-                                         include_boundaries=include_boundaries, 
-                                         include_gadgets=include_gadgets)
+                                         check_for_unfusions=check_for_unfusions
+                                         )
 
     for match_key in list(lcomp_matches.keys()):
         if max_vertex_index and match_key[0] > max_vertex_index:
@@ -436,6 +447,9 @@ def get_all_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex
     Returns:
     list: A list of vertices that are possible neighbors for unfusion.
     """
+    if is_vertex_next_to_boundary(graph, current_vertex):
+        return set()
+
     possible_unfusion_neighbours = set(graph.neighbors(current_vertex))
 
     if exclude_vertex and exclude_vertex in possible_unfusion_neighbours:
@@ -456,10 +470,20 @@ def unfuse_to_neighbor(graph, current_vertex, neighbor_vertex, desired_phase):
     Returns:
     tuple: A tuple containing the phaseless spider and the phase spider.
     """
-    new_phase = split_phases(graph.phases()[current_vertex], desired_phase)
-    phase_spider = graph.add_vertex(VertexType.Z, -2, graph.rows()[current_vertex], new_phase)
-
+    new_phase = split_phases(graph.phase(current_vertex), desired_phase)
+    phase_spider = graph.add_vertex(VertexType.Z,-2,graph.rows()[current_vertex],new_phase)
     graph.set_phase(current_vertex, desired_phase)
+
+    if neighbor_vertex == -1:
+        # TODO: Track phase index
+        # graph.update_phase_index(current_vertex,phase_spider)
+        graph.add_edge((phase_spider,current_vertex), EdgeType.SIMPLE)
+
+        # TODO: check if this is correct. In rules.py no extra phaseless spieder is added
+        phaseless_spider = insert_identity(graph, current_vertex, phase_spider)
+
+        return (phaseless_spider, phase_spider)
+
     graph.add_edge((phase_spider, neighbor_vertex), EdgeType.HADAMARD)
     graph.add_edge((current_vertex, phase_spider), EdgeType.SIMPLE)
 
@@ -501,8 +525,8 @@ def apply_pivot(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGra
             if unfusion_neighbors[vertex]:
                 time_to_unfuse_start = time.perf_counter()
                 phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbors[vertex], Fraction(0,1))
-                new_vertices.append(phaseless_spider)
-                new_vertices.append(phase_spider)
+                if phaseless_spider: new_vertices.append(phaseless_spider) 
+                if phase_spider: new_vertices.append(phase_spider)
                 time_to_unfuse += time.perf_counter() - time_to_unfuse_start
                 # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbors[vertex], phaseless_spider, phase_spider)
                 time_to_claculate_flow_start = time.perf_counter()
@@ -514,7 +538,6 @@ def apply_pivot(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGra
                 time_to_claculate_flow += time.perf_counter() - time_to_claculate_flow_start
                 was_neighbor_unfused = True
                 
-        # FIXME: update gflow is not correctly calculating the flow after the pivot
         # update_gflow_from_pivot(graph, vertex_1, vertex_2, flow)
 
         time_to_apply_rule_start = time.perf_counter()
@@ -551,7 +574,9 @@ def apply_lcomp(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGra
         if unfusion_neighbor:
             time_to_unfuse_start = time.perf_counter()
             phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbor, Fraction(1,2))
-            new_vertices = (phaseless_spider, phase_spider)
+            new_vertices = []
+            if phaseless_spider: new_vertices.append(phaseless_spider)
+            if phase_spider: new_vertices.append(phase_spider)
             time_to_unfuse = time.perf_counter() - time_to_unfuse_start
             # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbor, phaseless_spider, phase_spider)
             time_to_claculate_flow_start = time.perf_counter()
@@ -628,8 +653,6 @@ class WireReducer:
     def __init__(
         self,
         graph: BaseGraph[VT, ET],
-        include_boundaries=False,
-        include_gadgets=False,
         use_neighbor_unfusion=False,
         max_vertex_index=None,
         threshold=0,
@@ -643,8 +666,8 @@ class WireReducer:
 
         Args:
             graph (BaseGraph[VT, ET]): The graph to be reduced.
-            include_boundaries (bool): Whether to include boundary spiders.
-            include_gadgets (bool): Whether to include non-Clifford spiders.
+        
+        
             use_neighbor_unfusion (bool): Whether to use neighbor unfusion.
             max_vertex_index: The maximum vertex index.
             threshold (int): Lower bound for heuristic result.
@@ -654,8 +677,6 @@ class WireReducer:
             stats: Statistics object to track the reduction process.
         """
         self.graph = graph
-        self.include_boundaries = include_boundaries
-        self.include_gadgets = include_gadgets
         self.use_neighbor_unfusion = use_neighbor_unfusion
         self.max_vertex_index = max_vertex_index
         self.threshold = threshold
@@ -684,6 +705,7 @@ class WireReducer:
         self._time_to_unfuse = [0]
         self._time_to_calculate_flow = [0]
 
+        self.graph.track_phases = False
         
         # if self.max_vertex_index is None:
         #     self.max_vertex_index = max(self.graph.vertex_set())
@@ -703,8 +725,8 @@ class WireReducer:
     def greedy_wire_reduce(self):
         self.has_changes_occurred = True
 
-        local_complement_matches = lcomp_matcher(self.graph, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets, check_for_unfusions=self.use_neighbor_unfusion, calculate_heuristic=True)
-        pivot_matches = pivot_matcher(self.graph, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets, check_for_unfusions=self.use_neighbor_unfusion, calculate_heuristic=True)
+        local_complement_matches = lcomp_matcher(self.graph, check_for_unfusions=self.use_neighbor_unfusion, calculate_heuristic=True)
+        pivot_matches = pivot_matcher(self.graph, check_for_unfusions=self.use_neighbor_unfusion, calculate_heuristic=True)
 
         while self.has_changes_occurred:
             self.has_changes_occurred = False
@@ -725,8 +747,8 @@ class WireReducer:
     def random_wire_reduce(self):
         self.has_changes_occurred = True
 
-        local_complement_matches = lcomp_matcher(self.graph, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets, check_for_unfusions=self.use_neighbor_unfusion, calculate_heuristic=True)
-        pivot_matches = pivot_matcher(self.graph, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets, check_for_unfusions=self.use_neighbor_unfusion, calculate_heuristic=True)
+        local_complement_matches = lcomp_matcher(self.graph, check_for_unfusions=self.use_neighbor_unfusion, calculate_heuristic=True)
+        pivot_matches = pivot_matcher(self.graph, check_for_unfusions=self.use_neighbor_unfusion, calculate_heuristic=True)
 
         while self.has_changes_occurred:
             self.has_changes_occurred = False
@@ -1104,8 +1126,9 @@ class WireReducer:
             vertex_neighbors = set(vertex_neighbors).union(set(new_vertices))
 
         else:
-            # If no unfusion was applied check if the match is flow-preserving
-            if not skip_flow_calculation and self._calculate_flow(graph) is None:
+            # If no unfusion was applied and the FilterFlowFunc may not be met by the match check if the match is flow-preserving
+            # All pivot and lcomp matches are inherently gflow-preserving
+            if not skip_flow_calculation and self.flow_function != FilterFlowFunc.G_FLOW_PRESERVING and self._calculate_flow(graph) is None:
                 if match not in self._possibly_non_flow_preserving_matches:
                     self._possibly_non_flow_preserving_matches.append(match)
                 # logging.debug(f"Match {match} is not flow-preserving")
@@ -1244,7 +1267,7 @@ class WireReducer:
                 # if true_flow is None:
                 #     raise Exception("Flow is not preserved after applying the match")
 
-                lookahead_lcomp_matches, lookahead_pivot_matches = update_matches(graph=lookahead_graph, vertex_neighbors=vertex_neighbors, removed_vertices=removed_vertices, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, check_for_unfusions=self.use_neighbor_unfusion, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
+                lookahead_lcomp_matches, lookahead_pivot_matches = update_matches(graph=lookahead_graph, vertex_neighbors=vertex_neighbors, removed_vertices=removed_vertices, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, check_for_unfusions=self.use_neighbor_unfusion)
                 lookahead_current_match_list = current_match_list.copy()
 
                 self._reset_lookup_flow()
@@ -1387,7 +1410,7 @@ class WireReducer:
 
                     if match_result is not None:
                         vertex_neighbors, removed_vertices = match_result
-                        lcomp_matches, pivot_matches = update_matches(graph=self.graph, vertex_neighbors=vertex_neighbors, removed_vertices=removed_vertices, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, check_for_unfusions=self.use_neighbor_unfusion, include_boundaries=self.include_boundaries, include_gadgets=self.include_gadgets)
+                        lcomp_matches, pivot_matches = update_matches(graph=self.graph, vertex_neighbors=vertex_neighbors, removed_vertices=removed_vertices, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches, check_for_unfusions=self.use_neighbor_unfusion)
                     else:
                         raise Exception(f"Best match: {best_key} was found but could not be applied.")
 
@@ -1427,8 +1450,6 @@ class WireReducer:
 
 def greedy_wire_reduce(
     graph: BaseGraph[VT, ET],
-    include_boundaries=False,
-    include_gadgets=False,
     max_vertex_index=None,
     threshold=0,
     lookahead=0,
@@ -1444,8 +1465,6 @@ def greedy_wire_reduce(
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to simplify.
-    include_boundaries (bool): Whether to include boundary spiders in the search for matches. Defaults to False.
-    include_gadgets (bool): Whether to include non-Clifford spiders in the search for matches. Defaults to False.
     max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine. This is needed to prevent non-termination in the case of heuristic_threshold<0.
     threshold (int): Lower bound for heuristic result. Any rule application which adds more than this number of Hadamard wires is filtered out. Defaults to 0.
     lookahead (int): The number of steps to look ahead when searching for the best match. Defaults to 0.
@@ -1457,8 +1476,6 @@ def greedy_wire_reduce(
     """
     reducer = WireReducer(
         graph=graph,
-        include_boundaries=include_boundaries,
-        include_gadgets=include_gadgets,
         use_neighbor_unfusion=use_neighbor_unfusion,
         max_vertex_index=max_vertex_index,
         threshold=threshold,
@@ -1472,8 +1489,6 @@ def greedy_wire_reduce(
 
 def random_wire_reduce(
     graph: BaseGraph[VT, ET],
-    include_boundaries=False,
-    include_gadgets=False,
     max_vertex_index=None,
     threshold=0,
     lookahead=0,
@@ -1487,8 +1502,6 @@ def random_wire_reduce(
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to simplify.
-    include_boundaries (bool): Whether to include boundary spiders in the search for matches. Defaults to False.
-    include_gadgets (bool): Whether to include non-Clifford spiders in the search for matches. Defaults to False.
     max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine. This is needed to prevent non-termination in the case of heuristic_threshold<0.
     threshold (int): Lower bound for heuristic result. Any rule application which adds more than this number of Hadamard wires is filtered out. Defaults to 0.
     lookahead (int): The number of steps to look ahead when searching for the best match. Defaults to 0.
@@ -1501,8 +1514,6 @@ def random_wire_reduce(
 
     reducer = WireReducer(
         graph=graph,
-        include_boundaries=include_boundaries,
-        include_gadgets=include_gadgets,
         use_neighbor_unfusion=use_neighbor_unfusion,
         max_vertex_index=max_vertex_index,
         threshold=threshold,
@@ -1516,8 +1527,6 @@ def random_wire_reduce(
 def sim_annealing_wire_reduce(
     graph: BaseGraph[VT,ET], 
     max_vertex_index=None,
-    include_boundaries=False,
-    include_gadgets=False,
     use_neighbor_unfusion=True,
     initial_temperature=100, 
     cooling_rate=0.95, 
@@ -1532,8 +1541,6 @@ def sim_annealing_wire_reduce(
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to simplify.
     max_vertex_index (int): The highest index of any vertex present at the beginning of the heuristic simplification routine. This is needed to prevent non-termination in the case of heuristic_threshold<0.
-    include_boundaries (bool): Whether to include boundary spiders in the search for matches. Defaults to False.
-    include_gadgets (bool): Whether to include non-Clifford spiders in the search for matches. Defaults to False.
     use_neighbor_unfusion (bool): Whether to use neighbor unfusion. Defaults to False.
     initial_temperature (int): The initial temperature for the simulated annealing algorithm. Defaults to 100.
     cooling_rate (float): The cooling rate for the simulated annealing algorithm. Defaults to 0.95.
@@ -1554,8 +1561,6 @@ def sim_annealing_wire_reduce(
     return _sim_annealing_reduce(
         graph=graph,
         max_vertex_index=max_vertex_index,
-        include_boundaries=include_boundaries,
-        include_gadgets=include_gadgets,
         use_neighbor_unfusion=use_neighbor_unfusion,
         initial_temperature=initial_temperature,
         cooling_rate=cooling_rate,
@@ -1671,8 +1676,6 @@ def _apply_match(
 def _sim_annealing_reduce(
         graph: BaseGraph[VT,ET], 
         max_vertex_index=None,
-        include_boundaries=False,
-        include_gadgets=False,
         use_neighbor_unfusion=True,
         initial_temperature=100, 
         cooling_rate=0.95, 
@@ -1687,8 +1690,6 @@ def _sim_annealing_reduce(
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to reduce the number of wires in.
     max_vertex_index (int, optional): The maximum vertex to consider for matches.
-    include_boundaries (bool, optional): Whether to include boundary spiders in the search for matches. Defaults to False.
-    include_gadgets (bool, optional): Whether to include non-Clifford spiders in the search for matches. Defaults to False.
     use_neighbor_unfusion (bool, optional): Whether to use neighbor unfusion. Defaults to True.
     initial_temperature (int, optional): initial_temperature (int): Initial temperature for the simulated annealing process.
     cooling_rate (float, optional): The rate at which the temperature decreases.
@@ -1713,8 +1714,8 @@ def _sim_annealing_reduce(
     applied_matches = []
     reduction_per_match = []
 
-    local_complement_matches = lcomp_matcher(best_graph, check_for_unfusions=use_neighbor_unfusion, calculate_heuristic=True, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
-    pivot_matches = pivot_matcher(best_graph, check_for_unfusions=use_neighbor_unfusion, calculate_heuristic=True, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
+    local_complement_matches = lcomp_matcher(best_graph, check_for_unfusions=use_neighbor_unfusion, calculate_heuristic=True)
+    pivot_matches = pivot_matcher(best_graph, check_for_unfusions=use_neighbor_unfusion, calculate_heuristic=True)
 
     while temperature > min_temperature:
         iteration_count += 1
@@ -1760,7 +1761,7 @@ def _sim_annealing_reduce(
             applied_matches.append(match)
             reduction_per_match.append(match_value[0])
 
-            local_complement_matches, pivot_matches = update_matches(graph, vertex_neighbors, removed_vertices, local_complement_matches, pivot_matches, check_for_unfusions=use_neighbor_unfusion, max_vertex_index=max_vertex_index, include_boundaries=include_boundaries, include_gadgets=include_gadgets)
+            local_complement_matches, pivot_matches = update_matches(graph, vertex_neighbors, removed_vertices, local_complement_matches, pivot_matches, check_for_unfusions=use_neighbor_unfusion, max_vertex_index=max_vertex_index)
 
         temperature *= cooling_rate
 

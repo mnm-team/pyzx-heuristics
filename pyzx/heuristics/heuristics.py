@@ -229,3 +229,46 @@ def pivot_heuristic_neighbor_unfusion(graph: BaseGraph[VT,ET], edge, unfused_nei
     if debug:
         print("connected_neighbors ",connected_neighbors_count,"max_connections ",max_connections, "vertex_u_neighbors ",vertex_u_neighbors, "vertex_v_neighbors ",vertex_v_neighbors,"shared_neighbors ",shared_neighbors)
     return heuristic_result + len(graph.neighbors(vertex_u)) + len(graph.neighbors(vertex_v)) - 1 - gain_decrease
+
+def pivot_heuristic_phase_gadget(graph: BaseGraph[VT,ET], edge, vertex_with_gadget, debug=False):
+    """
+    Calculates heuristic for pivoting with phase gadgets
+
+    Parameters: 
+    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+    edge (int): spider where pivoting is to be applied
+    vertex_with_gadget (int): spider with phase gadget
+    debug (bool): print details of calculation
+
+    Returns:
+    int: Amount of saved (positive number) or added (negative number) Hadamard wires when applying neighbor unfusion with pivoting on the given edge 
+    """
+    vertex_u, vertex_v = graph.edge_st(edge)
+    vertex_u_neighbors = set(graph.neighbors(vertex_u))
+    vertex_u_neighbors.remove(vertex_v)
+    num_vertex_u_neighbors = len(vertex_u_neighbors) + 1 if vertex_with_gadget == vertex_u else len(vertex_u_neighbors)
+
+    vertex_v_neighbors = set(graph.neighbors(vertex_v))
+    vertex_v_neighbors.remove(vertex_u)
+    num_vertex_v_neighbors = len(vertex_v_neighbors) + 1 if vertex_with_gadget == vertex_v else len(vertex_v_neighbors)
+
+    shared_neighbors = set(vertex_u_neighbors & vertex_v_neighbors)
+    vertex_u_neighbors.difference_update(shared_neighbors)
+    vertex_v_neighbors.difference_update(shared_neighbors)
+    connected_neighbors_count = 0
+
+    max_connections = num_vertex_u_neighbors * num_vertex_v_neighbors + num_vertex_u_neighbors * len(shared_neighbors) + num_vertex_v_neighbors * len(shared_neighbors) #maximal number of connections
+
+    for neighbor in vertex_u_neighbors:
+        for neighbor2 in graph.neighbors(neighbor):
+            if neighbor2 in vertex_v_neighbors or neighbor2 in shared_neighbors:
+                connected_neighbors_count += 1
+    for neighbor in vertex_v_neighbors:
+        for neighbor2 in graph.neighbors(neighbor):
+            if neighbor2 in shared_neighbors:
+                connected_neighbors_count += 1
+    
+    heuristic_result = 2*connected_neighbors_count - max_connections
+    if debug:
+        print("connected_neighbors ",connected_neighbors_count,"max_connections ",max_connections, "vertex_u_neighbors ",vertex_u_neighbors, "vertex_v_neighbors ",vertex_v_neighbors,"shared_neighbors ",shared_neighbors)
+    return heuristic_result + len(graph.neighbors(vertex_u)) + len(graph.neighbors(vertex_v)) - 1

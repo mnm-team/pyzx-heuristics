@@ -1,13 +1,22 @@
+from fractions import Fraction
 from pathlib import Path
 import sys
 
-sys.path.append('..')
-sys.path.append('.')
+import pytest
+
+
+
+print(Path(__file__).parent.parent.parent)
+if Path(__file__).parent.parent.parent not in sys.path:
+    print("Adding path")
+    sys.path.append(str(Path(__file__).parent.parent.parent))
 
 import random
-import pytest
 import pyzx as zx
-from pyzx.heuristics.simplification import FilterFlowFunc, MatchType, apply_lcomp, apply_pivot, get_match_type, lcomp_matcher, pivot_matcher, update_matches
+from pyzx.simplify import to_graph_like
+from pyzx.graph.base import BaseGraph
+from pyzx.rules import match_lcomp_parallel, match_pivot_boundary, match_pivot_gadget, match_pivot_parallel
+from pyzx.heuristics.simplification import FilterFlowFunc, MatchType, apply_lcomp, apply_pivot, get_match_type, lcomp_matcher, pivot_matcher, unfuse_to_neighbor, update_matches
 from pyzx.extract import extract_architecture_aware_circuit
 from pyzx.routing.architecture import create_line_architecture
 
@@ -20,7 +29,7 @@ def load_graphs() -> dict[str, list]:
         circuit = zx.Circuit.load(file).to_basic_gates()
         # if circuit.qubits <= 19 and circuit.qubits >= 8 and len(circuit.gates) <= 5000 and len(circuit.gates) >= 100:
 
-        if file.stem == "gf2^5_mult" or file.stem == "gf2^6_mult" or file.stem == "barenco_tof_3" or file.stem == "mod_red_21":
+        if file.stem == "barenco_tof_3":#file.stem == "gf2^5_mult" or file.stem == "gf2^6_mult" or file.stem == "barenco_tof_3" or file.stem == "mod_red_21":
             try:
                 circuit = zx.optimize.basic_optimization(circuit)
             except Exception as e:
@@ -49,6 +58,14 @@ def get_circuit_and_fr_graph():
     zx.simplify.full_reduce(g_tele)
 
     return c, g_tele
+
+def generate_graph(num_qubits: int, depth: int) -> BaseGraph:
+    random.seed(1341)
+    g = zx.generate.cliffordT(qubits=num_qubits, depth=depth)
+    to_graph_like(g)
+
+    return g
+
 
 class TestHeuristics():
 
@@ -97,7 +114,7 @@ class TestHeuristics():
 
     def test_greedy_simp_correctness(self):
 
-        for name, circuit, graph in load_graphs():
+        for name, circuit, graph in zip(*load_graphs().values()):
 
             for la in range(2):
 
@@ -114,7 +131,7 @@ class TestHeuristics():
 
     def test_greedy_simp_neighbors(self):
             
-            for name, circuit, graph in load_graphs():
+            for name, circuit, graph in zip(*load_graphs().values()):
 
                 for la in range(2):
 
@@ -131,7 +148,7 @@ class TestHeuristics():
 
     def test_c_flow(self):
 
-        for name, circuit, graph in load_graphs():
+        for name, circuit, graph in zip(*load_graphs().values()):
 
                 for la in range(2):
 
@@ -178,5 +195,36 @@ class TestHeuristics():
 
         assert zx.compare_tensors(circuit, new_circuit)
 
+    def test_phase_gadget_matches(self):
+        g = generate_graph(5, 20)
+
+        lcomp_matches = lcomp_matcher(g, check_for_unfusions=False)
+        pivot_matches = pivot_matcher(g, check_for_unfusions=False)
+
+        g_unfused = g.clone()
+        for pivot_match in pivot_matches.items():
+            pivot_match_key, pivot_match_values = pivot_match
+            for pivot_match_value in pivot_match_values:
+                pivot_heuritstic, unfusion0, unfusion1 = pivot_match_value
+                if unfusion0 is not None and g_unfused.connected(pivot_match_key[0], pivot_match_key[1]):
+                    unfuse_to_neighbor(g_unfused, pivot_match_key[0], unfusion0, 0)
+                elif unfusion1 is not None and g_unfused.connected(pivot_match_key[0], pivot_match_key[1]):
+                    unfuse_to_neighbor(g_unfused, pivot_match_key[1], unfusion1, 0)
+
+                
+        zx_lcomp_matches = match_lcomp_parallel(g)
+
+        zx_pivot_matches = match_pivot_parallel(g)
+
+        g_pivot_gadget = g.clone()
+        zx_pivot_gadget_matches = match_pivot_gadget(g_pivot_gadget)
+
+        # g_pivot_boundary = g.clone()
+        # zx_pivot_boundary_matches = match_pivot_boundary(g_pivot_boundary)
+
+        assert set([key[0] for key, values in lcomp_matches.items()]) == set([key for key, _ in zx_lcomp_matches])
+        assert set([(key[0], key[1]) for key in pivot_matches.keys()]) == set([g.edge(key0, key1) for key0, key1, _, _ in zx_pivot_matches + zx_pivot_gadget_matches])
+
 # if __name__ == '__main__':
-#     pytest.main()
+#     # pytest.main()
+#     TestHeuristics().test_phase_gadget_matches()
