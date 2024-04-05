@@ -52,6 +52,7 @@ def is_vertex_next_to_boundary(graph, vertex):
     return False
 
 def check_lcomp_match(graph, vertex, check_for_unfusions = True, calculate_heuristic=True) -> Tuple[Tuple[VT], List[MatchLcompHeuristicType]] | None:
+    #TODO: add gadgets
     vertex_types = graph.types()
 
     current_vertex_type = vertex_types[vertex]
@@ -381,6 +382,7 @@ def update_matches(
             if neighbor_of_neighbor not in vertex_neighbors:
                 neighbors_of_neighbors.add(neighbor_of_neighbor)
 
+    # TODO: check if correct with gadgets
     lcomp_matches = update_lcomp_matches(graph=graph, 
                                          vertex_neighbors=vertex_neighbors, 
                                          removed_vertices=removed_vertices, 

@@ -29,7 +29,7 @@ def load_graphs() -> dict[str, list]:
         circuit = zx.Circuit.load(file).to_basic_gates()
         # if circuit.qubits <= 19 and circuit.qubits >= 8 and len(circuit.gates) <= 5000 and len(circuit.gates) >= 100:
 
-        if file.stem == "barenco_tof_3":#file.stem == "gf2^5_mult" or file.stem == "gf2^6_mult" or file.stem == "barenco_tof_3" or file.stem == "mod_red_21":
+        if file.stem == "gf2^5_mult" or file.stem == "gf2^6_mult" or file.stem == "barenco_tof_3" or file.stem == "mod_red_21":
             try:
                 circuit = zx.optimize.basic_optimization(circuit)
             except Exception as e:
@@ -135,6 +135,7 @@ class TestHeuristics():
 
                 for la in range(2):
 
+                    #FIXME: Is not correct for gf2^5_mult and beyond
                     simplified_graph = graph.copy()
                     # Apply the greedy simplification
                     zx.simplify.teleport_reduce(simplified_graph, quiet=True)
@@ -144,6 +145,7 @@ class TestHeuristics():
 
                     new_circuit = zx.extract_circuit(simplified_graph)
 
+                    print(f"Name: {name}, Lookahead: {la}")
                     assert zx.compare_tensors(circuit, new_circuit)
 
     def test_c_flow(self):
