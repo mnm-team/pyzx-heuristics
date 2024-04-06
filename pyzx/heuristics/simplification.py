@@ -52,7 +52,6 @@ def is_vertex_next_to_boundary(graph, vertex):
     return False
 
 def check_lcomp_match(graph, vertex, check_for_unfusions = True, calculate_heuristic=True) -> Tuple[Tuple[VT], List[MatchLcompHeuristicType]] | None:
-    #TODO: add gadgets
     vertex_types = graph.types()
 
     current_vertex_type = vertex_types[vertex]
@@ -65,12 +64,9 @@ def check_lcomp_match(graph, vertex, check_for_unfusions = True, calculate_heuri
     # needs_gadget = get_phase_type(current_vertex_phase) != PhaseType.TRUE_CLIFFORD
     # Skip if the vertex has only one neighbor (i.e., it's a leaf node)
     if len(graph.neighbors(vertex)) == 1: return None
-            
-    current_vertex_neighbors = list(graph.neighbors(vertex))
-
     if vertex in current_vertex_neighbors: return None
 
-    is_already_gadget = False
+    # is_already_gadget = False
     boundary_count = 0
     for neighbor in current_vertex_neighbors:
         # Check if the neighbor is a leaf node and the vertex needs to be gadgetized
@@ -95,7 +91,7 @@ def check_lcomp_match(graph, vertex, check_for_unfusions = True, calculate_heuri
         return (vertex,), [(lcomp_heuristic(graph,vertex)-boundary_count,current_vertex_neighbors,None)]
     elif check_for_unfusions:
         for neighbor in get_all_possible_unfusion_neighbours(graph, vertex, None):
-            matches.append((lcomp_heuristic_neighbor_unfusion(graph,vertex,neighbor)-boundary_count,current_vertex_neighbors,neighbor))
+            matches.append((lcomp_heuristic_neighbor_unfusion(graph,vertex,neighbor),current_vertex_neighbors,neighbor))
 
     if len(matches) > 0:
         return (vertex,), matches
@@ -104,82 +100,84 @@ def check_lcomp_match(graph, vertex, check_for_unfusions = True, calculate_heuri
 def check_pivot_match(graph, edge, check_for_unfusions=True, calculate_heuristic=True) -> Tuple[Tuple[VT, VT], List[MatchPivotHeuristicType]] | None:
     
     vertex_types = graph.types()
-
     if graph.edge_type(edge) != EdgeType.HADAMARD: return None
-        
-    vertex0, vertex1 = graph.edge_st(edge)
 
+    vertex0, vertex1 = graph.edge_st(edge)
     if vertex0 == vertex1: return None
 
-    if not (vertex_types[vertex0] == VertexType.Z and vertex_types[vertex1] == VertexType.Z): return None
-    
-    vertex0_needs_gadget = get_phase_type(graph.phase(vertex0)) != PhaseType.CLIFFORD
-    vertex1_needs_gadget = get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD
+    vertex0_type = vertex_types[vertex0]
+    vertex1_type = vertex_types[vertex1]
+    if not (vertex0_type == VertexType.Z and vertex1_type == VertexType.Z): return None
 
-    # Skip if the vertices have only one neighbor (i.e., they are leaf nodes)
-    if len(graph.neighbors(vertex0)) == 1 or len(graph.neighbors(vertex1)) == 1: return None 
+    vertex0_phase = graph.phase(vertex0)
+    vertex1_phase = graph.phase(vertex1)
+    vertex0_needs_unfusion = get_phase_type(vertex0_phase) != PhaseType.CLIFFORD
+    vertex1_needs_unfusion = get_phase_type(vertex1_phase) != PhaseType.CLIFFORD
 
-    vertex0_already_gadget = False
-    vertex1_already_gadget = False
-    boundary_count = 0
+    vertex0_neighbors = graph.neighbors(vertex0)
+    vertex1_neighbors = graph.neighbors(vertex1)
+    if len(vertex0_neighbors) == 1 or len(vertex1_neighbors) == 1: return None 
 
-    for neighbor in graph.neighbors(vertex0):
+    vertex0_is_gadget = False
+    vertex1_is_gadget = False
+    vertex0_boundary = set()
+    vertex1_boundary = set()
+
+    for neighbor in vertex0_neighbors:
         if vertex_types[neighbor] != VertexType.Z:
-            boundary_count += 1
+            vertex0_boundary.add(neighbor)
+        if len(graph.neighbors(neighbor)) == 1 and vertex0_needs_unfusion: 
+            vertex0_is_gadget = True
 
-        # Set the flag if the neighbor is a root of a second phase gadget
-        if len(graph.neighbors(neighbor)) == 1 and get_phase_type(graph.phase(vertex0)) != PhaseType.CLIFFORD: 
-            vertex0_already_gadget = True
-
-    for neighbor in graph.neighbors(vertex1):
+    for neighbor in vertex1_neighbors:
         if vertex_types[neighbor] != VertexType.Z:
-            boundary_count += 1
+            vertex1_boundary.add(neighbor)
+        if len(graph.neighbors(neighbor)) == 1 and vertex1_needs_unfusion: 
+            vertex1_is_gadget = True
 
-        # Set the flag if the neighbor is a root of a second phase gadget
-        if len(graph.neighbors(neighbor)) == 1 and get_phase_type(graph.phase(vertex1)) != PhaseType.CLIFFORD: 
-            vertex1_already_gadget = True
+    # Check if vertex needs unfusion but is already a gadget
+    if (vertex0_is_gadget and vertex0_needs_unfusion) or (vertex1_is_gadget and vertex1_needs_unfusion): return None
+    # Check if unfusion is not allowd but needed
+    if not check_for_unfusions and (vertex0_needs_unfusion or vertex1_needs_unfusion): return None
 
-    if (vertex0_already_gadget and vertex0_needs_gadget) or (vertex1_already_gadget and vertex1_needs_gadget): return None
-    if boundary_count > 1: return None
+    boundary_count = len(vertex0_boundary) + len(vertex1_boundary)
+    if boundary_count > 0: return None
 
     if not calculate_heuristic:
         return (vertex0, vertex1), [(0, None, None)]
 
-    matches = []
-    if get_phase_type(graph.phase(vertex0)) == PhaseType.CLIFFORD:
-        if get_phase_type(graph.phase(vertex1)) == PhaseType.CLIFFORD:
-            return (vertex0, vertex1), [(pivot_heuristic(graph,edge)-boundary_count,None,None)]
-        
-        elif check_for_unfusions:
-            # Neighbor unfusion at vertex 1
-            for neighbor in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
-                matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,None,neighbor)-boundary_count,None,neighbor))
+    if vertex0_boundary and vertex0_needs_unfusion:
+        return (vertex0, vertex1), [(pivot_heuristic(graph,edge),-1,None)]
+    elif vertex1_boundary and vertex1_needs_unfusion:
+        return (vertex0, vertex1), [(pivot_heuristic(graph,edge),None,-1)]
+    
+    # No need for unfusion or phase gadget
+    if not vertex0_needs_unfusion and not vertex1_needs_unfusion:
+        return (vertex0, vertex1), [(pivot_heuristic(graph,edge),None,None)]
 
-        # else:
-            # Phase gadget unfusion at vertex 1
-            if not is_vertex_next_to_boundary(graph, vertex0) and not is_vertex_next_to_boundary(graph, vertex1):
-                matches.append((pivot_heuristic(graph,edge)-boundary_count,None,-1))
-        
-    elif check_for_unfusions:
-        if get_phase_type(graph.phase(vertex1)) == PhaseType.CLIFFORD:
-            # Neighbor unfusion at vertex 0
-            for neighbor in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
-                matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor,None)-boundary_count,neighbor,None))
-            # Phase gadget unfusion at vertex 0
-            if not is_vertex_next_to_boundary(graph, vertex0) and not is_vertex_next_to_boundary(graph, vertex1):
-                matches.append((pivot_heuristic(graph,edge)-boundary_count,-1, None))
-        else:
-            # Neighbor unfusion at both vertices
+    matches = []
+    if check_for_unfusions:
+        if vertex0_needs_unfusion and vertex1_needs_unfusion:
+            # Unfuse both vertices to all possible neighbors
             for neighbor_v0 in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
                 for neighbor_v1 in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
-                    matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor_v0,neighbor_v1)-boundary_count,neighbor_v0,neighbor_v1))
-    
-    # else:
-    #     if get_phase_type(graph.phase(vertex1)) == PhaseType.CLIFFORD:
-    #         if not is_vertex_next_to_boundary(graph, vertex0) and not is_vertex_next_to_boundary(graph, vertex1):
-    #             matches.append((pivot_heuristic(graph,edge)-boundary_count,-1, None))
-
-    if len(matches) > 0:
+                    matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor_v0,neighbor_v1),neighbor_v0,neighbor_v1))
+        elif vertex0_needs_unfusion:
+            # Unfuse vertex0 to all possible neighbors
+            for neighbor in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
+                matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,None,neighbor),None,neighbor))
+            # Phase gadget unfusion for vertex0
+            if not is_vertex_next_to_boundary(graph, vertex0) and not is_vertex_next_to_boundary(graph, vertex1):
+                matches.append((pivot_heuristic(graph,edge),None,-1))
+        elif vertex1_needs_unfusion:
+            # Unfuse vertex1 to all possible neighbors
+            for neighbor in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
+                matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor,None),neighbor,None))
+            # Phase gadget unfusion for vertex1
+            if not is_vertex_next_to_boundary(graph, vertex0) and not is_vertex_next_to_boundary(graph, vertex1):
+                matches.append((pivot_heuristic(graph,edge),-1, None))
+        
+    if matches:
         return (vertex0, vertex1), matches
     return None
 
@@ -497,8 +495,8 @@ def unfuse_to_neighbor(graph, current_vertex, neighbor_vertex, desired_phase):
 
 
 
-def apply_pivot(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGraph, Tuple[VT, VT]], bool] = None) -> Tuple[Tuple[VT, ...], Dict[Tuple[VT, VT], bool] | None] | None:
-        """
+def apply_pivot(graph: BaseGraph[VT,ET], match: Tuple[Tuple[VT, VT], MatchPivotHeuristicType], flow_function: Callable[[BaseGraph, Tuple[VT, VT]], bool] = None) -> Tuple[Tuple[VT, ...], Dict[Tuple[VT, VT], bool] | None] | None:
+    """
         Apply a pivot operation to a graph.
         If a flow function is provided, the flow of the graph is calculated for each edge unfused.
 
@@ -508,51 +506,65 @@ def apply_pivot(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGra
         flow_function (optinal[Callable]): A function to calculate the flow of the graph for each edge unfused.
 
         Returns:
-        tuple: A tuple containing the added unfusion vertices and a dictionary storing the flow preserving attribute of each edge.
-        """
+        tuple[tuple[tuple, dict], dict]: A tuple containing the added unfusion vertices, a dictionary storing the flow preserving attribute of each edge, and a dictionary containing the time for each processing step.
+    """
+    match_key, match_value = match
+    vertex_0, vertex_1 = match_key
+    
+    unfusion_neighbors = {vertex_0: match_value[1], vertex_1: match_value[2]}
+    
+    vertex0_neighbors = set(graph.neighbors(vertex_0))
+    vertex1_neighbors = set(graph.neighbors(vertex_1))
+    
+    vertex0_boundary = [vertex for vertex in vertex0_neighbors if graph.type(vertex) != VertexType.Z]
+    vertex1_boundary = [vertex for vertex in vertex1_neighbors if graph.type(vertex) != VertexType.Z]
+    
+    # if len(vertex0_boundary) + len(vertex1_boundary) > 1:
+    #     return None, None
+    # if unfusion_neighbors[vertex_0] in vertex0_boundary or unfusion_neighbors[vertex_1] in vertex1_boundary:
+    #     return None, None
+    
+    # if vertex0_boundary and (unfusion_neighbors[vertex_0] is not None and unfusion_neighbors[vertex_0] != -1):
+    #     return None, None
+    # if vertex1_boundary and (unfusion_neighbors[vertex_1] is not None and unfusion_neighbors[vertex_1] != -1):
+    #     return None, None
+    
+    new_vertices = []
+    flow = {}
+    was_neighbor_unfused = False
+    
+    # Initialize a dictionary to store all time-related variables
+    time_dict = {"time_to_unfuse": 0, "time_to_claculate_flow": 0, "time_to_apply_rule": 0}
+    
+    for vertex, unfusion_neighbor in unfusion_neighbors.items():
+        if unfusion_neighbor:
+            time_to_unfuse_start = time.perf_counter()
+            phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbor, Fraction(0,1))
+            if phaseless_spider: new_vertices.append(phaseless_spider) 
+            if phase_spider: new_vertices.append(phase_spider)
+            time_dict["time_to_unfuse"] += time.perf_counter() - time_to_unfuse_start
+    
+            time_to_claculate_flow_start = time.perf_counter()
+            if flow_function:
+                unfused_edge = graph.edge(vertex, unfusion_neighbor) if unfusion_neighbor != -1 else graph.edge(vertex, phase_spider)
+                flow[unfused_edge] = flow_function(graph, unfused_edge)
+            else:
+                flow = None
+            time_dict["time_to_claculate_flow"] += time.perf_counter() - time_to_claculate_flow_start
+            was_neighbor_unfused = True
+    
+    time_to_apply_rule_start = time.perf_counter()
+    # apply_rule(graph, pivot, [(vertex_0, vertex_1, vertex0_boundary, vertex1_boundary)])
+    apply_rule(graph, pivot, [(vertex_0, vertex_1, [], [])])
+    time_dict["time_to_apply_rule"] = time.perf_counter() - time_to_apply_rule_start
+    
+    if was_neighbor_unfused:
+        return (tuple(new_vertices), flow), time_dict
+    
+    return None, time_dict
 
-        match_key, match_value = match
-        vertex_1, vertex_2 = match_key
-
-        unfusion_neighbors = {}
-        unfusion_neighbors[vertex_1] = match_value[1]
-        unfusion_neighbors[vertex_2] = match_value[2]
-
-        new_vertices = []
-        flow = {}
-        was_neighbor_unfused = False
-        time_to_unfuse = 0
-        time_to_claculate_flow = 0
-        for vertex in [vertex_1, vertex_2]:
-            if unfusion_neighbors[vertex]:
-                time_to_unfuse_start = time.perf_counter()
-                phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbors[vertex], Fraction(0,1))
-                if phaseless_spider: new_vertices.append(phaseless_spider) 
-                if phase_spider: new_vertices.append(phase_spider)
-                time_to_unfuse += time.perf_counter() - time_to_unfuse_start
-                # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbors[vertex], phaseless_spider, phase_spider)
-                time_to_claculate_flow_start = time.perf_counter()
-                if flow_function:
-                    edge = graph.edge(vertex, unfusion_neighbors[vertex])
-                    flow[edge] = flow_function(graph, edge)
-                else:
-                    flow = None
-                time_to_claculate_flow += time.perf_counter() - time_to_claculate_flow_start
-                was_neighbor_unfused = True
-                
-        # update_gflow_from_pivot(graph, vertex_1, vertex_2, flow)
-
-        time_to_apply_rule_start = time.perf_counter()
-        apply_rule(graph, pivot, [(vertex_1, vertex_2, [], [])])
-        time_to_apply_rule = time.perf_counter() - time_to_apply_rule_start
-
-        if was_neighbor_unfused:
-            return (tuple(new_vertices), flow), {"time_to_unfuse": time_to_unfuse, "time_to_claculate_flow": time_to_claculate_flow, "time_to_apply_rule": time_to_apply_rule}
-        
-        return None, {"time_to_unfuse": 0, "time_to_claculate_flow": 0, "time_to_apply_rule": time_to_apply_rule}
-
-def apply_lcomp(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGraph, Tuple[VT, VT]], bool] = None) -> Tuple[Tuple[VT, VT], Dict[Tuple[VT, VT], bool] | None] | None:
-        """
+def apply_lcomp(graph: BaseGraph[VT,ET], match: Tuple[Tuple[VT,], MatchLcompHeuristicType], flow_function: Callable[[BaseGraph, Tuple[VT, VT]], bool] = None) -> Tuple[Tuple[VT, VT], Dict[Tuple[VT, VT], bool] | None] | None:
+    """
         Apply a local complementation operation to a graph.
         If a flow function is provided, the flow of the graph is calculated for each edge unfused.
 
@@ -563,43 +575,41 @@ def apply_lcomp(graph: BaseGraph[VT,ET], match, flow_function: Callable[[BaseGra
 
         Returns:
         tuple: A tuple containing the added unfusion vertices and a dictionary storing the flow preserving attribute of each edge.
-        """
-        match_key, match_value = match
-        vertex = match_key[0]
-        neighbors = match_value[1]
-        unfusion_neighbor = match_value[2]
+    """
 
-        neighbors_copy = neighbors[:]
+    match_key, match_value = match
+    vertex = match_key[0]
+    neighbors = match_value[1]
+    unfusion_neighbor = match_value[2]
 
-        was_neighbor_unfused = False
+    was_neighbor_unfused = False
+    time_dict = {"time_to_unfuse": 0, "time_to_claculate_flow": 0, "time_to_apply_rule": 0}
 
-        if unfusion_neighbor:
-            time_to_unfuse_start = time.perf_counter()
-            phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbor, Fraction(1,2))
-            new_vertices = []
-            if phaseless_spider: new_vertices.append(phaseless_spider)
-            if phase_spider: new_vertices.append(phase_spider)
-            time_to_unfuse = time.perf_counter() - time_to_unfuse_start
-            # update_gflow_from_double_insertion(flow, vertex, unfusion_neighbor, phaseless_spider, phase_spider)
-            time_to_claculate_flow_start = time.perf_counter()
-            neighbors_copy = [phaseless_spider if neighbor == unfusion_neighbor else neighbor for neighbor in neighbors_copy]
-            if flow_function:
-                flow = {(edge := graph.edge(vertex, unfusion_neighbor)) : flow_function(graph, edge)}
-            else:
-                flow = None
-            time_to_claculate_flow = time.perf_counter() - time_to_claculate_flow_start
-            was_neighbor_unfused = True
+    if unfusion_neighbor:
+        time_to_unfuse_start = time.perf_counter()
+        phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbor, Fraction(1,2))
+        new_vertices = [v for v in [phaseless_spider, phase_spider] if v]
+        time_dict["time_to_unfuse"] = time.perf_counter() - time_to_unfuse_start
 
-        #TODO: check if update_gflow_from_lcomp is calculating the correct flow after the lcomp
-        # update_gflow_from_lcomp(graph, vertex, flow)
-        time_to_apply_rule_start = time.perf_counter()
-        apply_rule(graph, lcomp, [(vertex, neighbors_copy)])
-        time_to_apply_rule = time.perf_counter() - time_to_apply_rule_start
+        time_to_claculate_flow_start = time.perf_counter()
+        neighbors_copy = [phaseless_spider if neighbor == unfusion_neighbor else neighbor for neighbor in neighbors]
+        unfused_edge = graph.edge(vertex, unfusion_neighbor) if unfusion_neighbor != -1 else graph.edge(vertex, phase_spider)
+        flow = {unfused_edge: flow_function(graph, unfused_edge)} if flow_function else None
+        time_dict["time_to_claculate_flow"] = time.perf_counter() - time_to_claculate_flow_start
 
-        if was_neighbor_unfused:
-            return (new_vertices, flow), {"time_to_unfuse": time_to_unfuse, "time_to_claculate_flow": time_to_claculate_flow, "time_to_apply_rule": time_to_apply_rule}
+        was_neighbor_unfused = True
+    else:
+        neighbors_copy = neighbors.copy()
+        flow = None
 
-        return None, {"time_to_unfuse": 0, "time_to_claculate_flow": 0, "time_to_apply_rule": time_to_apply_rule}
+    time_to_apply_rule_start = time.perf_counter()
+    apply_rule(graph, lcomp, [(vertex, neighbors_copy)])
+    time_dict["time_to_apply_rule"] = time.perf_counter() - time_to_apply_rule_start
+
+    if was_neighbor_unfused:
+        return (tuple(new_vertices), flow), time_dict
+
+    return None, time_dict
 
 
 def get_match_type(match: Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]) -> MatchType:
@@ -636,6 +646,23 @@ def is_match_unfusing(match: Tuple[Tuple[VT, ...], MatchLcompHeuristicType | Mat
         return match_value[-1] is not None
     elif get_match_type(match) == MatchType.PIVOT:
         return match_value[-1] is not None or match_value[-2] is not None
+    
+def is_match_boundary(graph:BaseGraph, match: Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]) -> bool:
+    """
+    Check if a match is boundary.
+
+    Parameters:
+    match (tuple): The match to check.
+    
+    Returns:
+    bool: True if the match is boundary, False otherwise.
+    """
+    match_key, _ = match
+
+    for vertex in match_key:
+        if is_vertex_next_to_boundary(graph, vertex):
+            return True
+    return False
 
 
 
@@ -699,13 +726,14 @@ class WireReducer:
         self._reduction_per_match = []
         self._applied_matches = []
         self._remaining_matches = []
-        self._matches = {"total matches": [0], "total unfusion matches": [0], "evaluated true": [0], "evaluated false": [0], "evaluated unfusion true": [0], "evaluated unfusion false": [0]}
-        self._neighbor_unfusions = {"total": [0], "skipped true": [0], "skipped false": [0], "evaluated true": [0], "evaluated false": [0]}
+        self._matches = {"total matches": [0], "total unfusion matches": [0], "total boundary matches":[0], "evaluated true": [0], "evaluated false": [0], "evaluated unfusion true": [0], "evaluated unfusion false": [0]}
+        self._neighbor_unfusions = {"total": [0], "gadgets": [0], "skipped true": [0], "skipped false": [0], "evaluated true": [0], "evaluated false": [0]}
         self._rehabilitated_non_flow_preserving_matches = 0
 
         self._time_to_apply_match = [0]
         self._time_to_unfuse = [0]
         self._time_to_calculate_flow = [0]
+        self._time_dict = {"time_to_unfuse": [0], "time_to_claculate_flow": [0], "time_to_apply_rule": [0]}
 
         self.graph.track_phases = False
         
@@ -744,6 +772,7 @@ class WireReducer:
         logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Std reduction: {np.std(self._reduction_per_match)}")
         logging.info(f"Neighbor unfusions: {total_neighbor_unfusions_info}")
         logging.info(f"Matches: {total_matches_info}")
+        logging.info(f"Number of vertices: {len(self.graph.vertex_set())}, Number of edges: {len(self.graph.edge_set())}")
         return sum(self._reduction_per_match), self._applied_matches
     
     def random_wire_reduce(self):
@@ -785,6 +814,10 @@ class WireReducer:
         """
 
         self._neighbor_unfusions["total"][-1] += 1
+
+        # v0, v1 = edge
+        # if len(graph.neighbors(v0)) == 1 or len(graph.neighbors(v1)) == 1:
+        #     self._neighbor_unfusions["gadgets"][-1] += 1
         
         if edge not in self._lookup_flow_for_unfusion:
             flow = self._calculate_flow(graph) is not None
@@ -1098,6 +1131,9 @@ class WireReducer:
         match_key, match_value = match
         vertex_neighbors = set()
 
+        #For testing purposes
+        # graph_copy = graph.clone()
+
         flow_function = self._lookup_flow_preserving_for_edge if not skip_flow_calculation and self.use_neighbor_unfusion else None
 
         if get_match_type(match) == MatchType.PIVOT:
@@ -1108,9 +1144,10 @@ class WireReducer:
             match_result_with_time = apply_lcomp(graph, match=match, flow_function=flow_function)
         
         match_result, time_info = match_result_with_time
-        self._time_to_apply_match[-1] += time_info["time_to_apply_rule"]
-        self._time_to_unfuse[-1] += time_info["time_to_unfuse"]
-        self._time_to_calculate_flow[-1] += time_info["time_to_claculate_flow"]
+        if time_info is not None:
+            self._time_dict["time_to_unfuse"][-1] += time_info["time_to_unfuse"]
+            self._time_dict["time_to_claculate_flow"][-1] += time_info["time_to_claculate_flow"]
+            self._time_dict["time_to_apply_rule"][-1] += time_info["time_to_apply_rule"]
 
         if match_result is not None:
             new_vertices, edge_flow = match_result
@@ -1146,11 +1183,19 @@ class WireReducer:
             if is_match_unfusing(match):
                 self._matches["evaluated unfusion true"][-1] += 1
                 self._matches["total unfusion matches"][-1] += 1
+            # elif is_match_boundary(graph_copy, match):
+            #     self._matches["total boundary matches"][-1] += 1
+            #     self._matches["evaluated true"][-1] += 1
             else:
                 self._matches["evaluated true"][-1] += 1
                 self._matches["total matches"][-1] += 1
 
-        return list(vertex_neighbors), match_key
+        removed_vertices = [key for key in match_key if key not in graph.vertex_set()]
+        # leftover_vertices = [vertex for vertex in match_key if vertex not in removed_vertices]
+        # vertex_neighbors = {vertex_neighbor for vertex in leftover_vertices for vertex_neighbor in graph.neighbors(vertex) if vertex_neighbor not in leftover_vertices}
+        
+
+        return list(vertex_neighbors), removed_vertices
 
 
     def _update_best_result(
@@ -1220,9 +1265,7 @@ class WireReducer:
         """
 
         if depth == self.lookahead:
-            # t = time.perf_counter()
             current_results = apply_match_method(graph=graph, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
-            # self._time_to_apply_match[-1] += time.perf_counter() - t
             if not current_results:
                 return best_result
             
@@ -1296,12 +1339,12 @@ class WireReducer:
     def _log_data(self):
         current_match_info = {key: values[-1] for key, values in self._matches.items()}
         current_neighbor_unfusions = {key: values[-1] for key, values in self._neighbor_unfusions.items()}
+        current_times = {key: times[-1] for key, times in self._time_dict.items()}
         logging.debug(f"Current Neighbor unfusions {current_neighbor_unfusions}")
         logging.debug(f"Current Matches {current_match_info}")
-        logging.debug(f"Current Time to apply match {self._time_to_apply_match[-1]}")
-        logging.debug(f"Current Time to unfuse {self._time_to_unfuse[-1]}")
-        logging.debug(f"Current Time to calculate flow {self._time_to_calculate_flow[-1]}")
+        logging.debug(f"Current Time {current_times}")
         logging.debug(f"Rehabilitated {self._rehabilitated_non_flow_preserving_matches} non flow-preserving matches")
+        logging.debug(f"Number of vertices: {len(self.graph.vertex_set())}, Number of edges: {len(self.graph.edge_set())}")
 
     def _full_search_match_with_best_result_at_depth(self, graph, lcomp_matches: Dict[Tuple[VT], List[MatchLcompHeuristicType]], pivot_matches: Dict[Tuple[VT, VT], List[MatchPivotHeuristicType]]) -> Dict[Tuple, List[MatchLcompHeuristicType | MatchPivotHeuristicType]] | None:
         """
@@ -1393,9 +1436,6 @@ class WireReducer:
                 logging.debug(f"Reduction of the last {num_matches} matches: {sum(last_matches)}")
 
         if not stop_search:
-
-            if len(self._applied_matches) == 6:
-                print("")
             
             best_match_list = find_matches_method(graph=self.graph, lcomp_matches=lcomp_matches, pivot_matches=pivot_matches)
 
@@ -1432,9 +1472,9 @@ class WireReducer:
                 for key in self._neighbor_unfusions.keys():
                     self._neighbor_unfusions[key].append(0)
                 
-                self._time_to_apply_match.append(0)
-                self._time_to_unfuse.append(0)
-                self._time_to_calculate_flow.append(0)
+                self._time_dict["time_to_apply_rule"].append(0)
+                self._time_dict["time_to_unfuse"].append(0)
+                self._time_dict["time_to_claculate_flow"].append(0)
 
                 pid = os.getpid()
                 python_process = psutil.Process(pid)

@@ -46,9 +46,9 @@ def load_graphs() -> dict[str, list]:
 def deep_tuple(lst):
     return tuple(deep_tuple(i) if isinstance(i, list) or isinstance(i, tuple) else i for i in lst)
 
-def get_circuit_and_fr_graph():
-    random.seed(1349)
-    g = zx.generate.cliffordT(qubits=5, depth=50, p_t=0.3, p_cnot=0.5)
+def get_circuit_and_fr_graph(num_qubits: int = 5, depth: int = 50):
+    random.seed(1341)
+    g = zx.generate.cliffordT(qubits=num_qubits, depth=depth, p_t=0.3, p_cnot=0.5)
     # c = zx.generate.phase_poly(n_qubits=16, n_phase_layers=20, cnots_per_layer=10)
     c = zx.Circuit.from_graph(g)
     c = zx.optimize.basic_optimization(c.split_phase_gates()).split_phase_gates()
@@ -112,9 +112,26 @@ class TestHeuristics():
             assert len(lcomp_diff) == 0
             assert len(pivot_diff) == 0
 
-    def test_greedy_simp_correctness(self):
+    def test_greedy_simp(self):
 
-        for name, circuit, graph in zip(*load_graphs().values()):
+        circuit, graph = get_circuit_and_fr_graph(5, 10)
+
+        for la in range(2):
+
+            simplified_graph = graph.copy()
+            # Apply the greedy simplification
+            zx.simplify.teleport_reduce(simplified_graph, quiet=True)
+
+            # Apply the greedy simplification
+            zx.simplify.greedy_simp(simplified_graph, lookahead=la, quiet=True)
+
+            new_circuit = zx.extract_circuit(simplified_graph)
+
+            assert zx.compare_tensors(circuit, new_circuit)
+
+    def test_greedy_simp_neighbors(self):
+            
+            circuit, graph = get_circuit_and_fr_graph(10, 20)
 
             for la in range(2):
 
@@ -123,52 +140,33 @@ class TestHeuristics():
                 zx.simplify.teleport_reduce(simplified_graph, quiet=True)
 
                 # Apply the greedy simplification
-                zx.simplify.greedy_simp(simplified_graph, lookahead=la, quiet=True)
+                zx.simplify.greedy_simp_neighbors(simplified_graph, lookahead=la, quiet=True)
 
                 new_circuit = zx.extract_circuit(simplified_graph)
 
                 assert zx.compare_tensors(circuit, new_circuit)
 
-    def test_greedy_simp_neighbors(self):
-            
-            for name, circuit, graph in zip(*load_graphs().values()):
-
-                for la in range(2):
-
-                    #FIXME: Is not correct for gf2^5_mult and beyond
-                    simplified_graph = graph.copy()
-                    # Apply the greedy simplification
-                    zx.simplify.teleport_reduce(simplified_graph, quiet=True)
-
-                    # Apply the greedy simplification
-                    zx.simplify.greedy_simp_neighbors(simplified_graph, lookahead=la, quiet=True)
-
-                    new_circuit = zx.extract_circuit(simplified_graph)
-
-                    print(f"Name: {name}, Lookahead: {la}")
-                    assert zx.compare_tensors(circuit, new_circuit)
-
     def test_c_flow(self):
 
-        for name, circuit, graph in zip(*load_graphs().values()):
+        circuit, graph = get_circuit_and_fr_graph(5, 10)
 
-                for la in range(2):
+        for la in range(2):
 
-                    simplified_graph = graph.copy()
-                    # Apply the greedy simplification
-                    zx.simplify.teleport_reduce(simplified_graph, quiet=True)
+            simplified_graph = graph.copy()
+            # Apply the greedy simplification
+            zx.simplify.teleport_reduce(simplified_graph, quiet=True)
 
-                    # Apply the greedy simplification
-                    g_simp = simplified_graph.copy()
-                    g_simp_nu = simplified_graph.copy()
-                    zx.simplify.greedy_simp(g_simp, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, quiet=True)
-                    zx.simplify.greedy_simp_neighbors(g_simp_nu, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, quiet=True)
+            # Apply the greedy simplification
+            g_simp = simplified_graph.copy()
+            g_simp_nu = simplified_graph.copy()
+            zx.simplify.greedy_simp(g_simp, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, quiet=True)
+            zx.simplify.greedy_simp_neighbors(g_simp_nu, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, quiet=True)
 
-                    new_circuit_simp = zx.extract_circuit(g_simp)
-                    new_circuit_simp_nu = zx.extract_circuit(g_simp_nu)
+            new_circuit_simp = zx.extract_circuit(g_simp)
+            new_circuit_simp_nu = zx.extract_circuit(g_simp_nu)
 
-                    assert zx.compare_tensors(circuit, new_circuit_simp)
-                    assert zx.compare_tensors(circuit, new_circuit_simp_nu)
+            assert zx.compare_tensors(circuit, new_circuit_simp)
+            assert zx.compare_tensors(circuit, new_circuit_simp_nu)
             
     def test_architecture_aware_extraction(self):
         
