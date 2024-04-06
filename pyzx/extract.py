@@ -669,7 +669,6 @@ def extract_circuit(
         frontier.append(v)
         qubit_map[v] = i
     czs_saved = 0
-    q: Union[float, int]
     
     while True:
         # preprocessing

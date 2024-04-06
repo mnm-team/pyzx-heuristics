@@ -225,6 +225,25 @@ class TestHeuristics():
         assert set([key[0] for key, values in lcomp_matches.items()]) == set([key for key, _ in zx_lcomp_matches])
         assert set([(key[0], key[1]) for key in pivot_matches.keys()]) == set([g.edge(key0, key1) for key0, key1, _, _ in zx_pivot_matches + zx_pivot_gadget_matches])
 
+    def test_phase_gadget(self):
+        g = generate_graph(5, 20)
+
+        pivot_matches = pivot_matcher(g, check_for_unfusions=True)
+
+        def get_first_match_with_gadget(pivot_matches):
+            for match_key, match_values in pivot_matches.items():
+                for match_value in match_values:
+                    pivot_heuritstic, unfusion0, unfusion1 = match_value
+                    if unfusion0 and unfusion0 == -1:
+                        return match_key, match_value
+                    elif unfusion1 and unfusion1 == -1:
+                        return match_key, match_value
+            return None, None
+        
+        match_key, match_value = get_first_match_with_gadget(pivot_matches)
+
+        if match_key is not None:
+            apply_pivot(g, (match_key, match_value), FilterFlowFunc.G_FLOW_PRESERVING)
+        
 # if __name__ == '__main__':
 #     # pytest.main()
-#     TestHeuristics().test_phase_gadget_matches()

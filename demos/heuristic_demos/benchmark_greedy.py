@@ -1,9 +1,10 @@
 import sys
 
-sys.path.append('../..')
 from pathlib import Path
 
-sys.path.append("c:\\Users\\wsajk\\Documents\\Arbeit\\MUNIQC-Atoms\\pyzx-heuristics")
+print(Path(__file__).parent.parent.parent)
+if Path(__file__).parent.parent.parent not in sys.path:
+    sys.path.append(str(Path(__file__).parent.parent.parent))
 
 import time
 
@@ -42,7 +43,7 @@ for file in Path(path_to_circuits).glob('*.qasm'):
     circuit = zx.Circuit.load(file).to_basic_gates()
     # if circuit.qubits <= 19 and circuit.qubits >= 8 and len(circuit.gates) <= 5000 and len(circuit.gates) >= 100:
 
-    if file.stem == "mod_red_21":#"tof_10" or file.stem == "mod_red_21" or file.stem == "gf2^5_mult" or file.stem == "gf2^6_mult" or file.stem == "barenco_tof_3":
+    if file.stem == "tof_10" or file.stem == "mod_red_21" or file.stem == "gf2^5_mult" or file.stem == "gf2^6_mult" or file.stem == "barenco_tof_3":
         try:
             circuit = zx.optimize.basic_optimization(circuit)
         except Exception as e:
@@ -254,7 +255,7 @@ def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool
         algorithm(graph_simplified)
         end = time.perf_counter() - start
 
-        with open(f"graphs/{name}_{algorithm_name}.json", 'w') as f:
+        with open(f"{Path(__file__).parent}/graphs/{name}_{algorithm_name}.json", 'w') as f:
             f.write(graph_simplified.to_json())
 
         logging.info(f"Finished execution in {end} seconds")

@@ -141,19 +141,21 @@ def check_pivot_match(graph, edge, check_for_unfusions=True, calculate_heuristic
     if not check_for_unfusions and (vertex0_needs_unfusion or vertex1_needs_unfusion): return None
 
     boundary_count = len(vertex0_boundary) + len(vertex1_boundary)
-    if boundary_count > 0: return None
+    if boundary_count > 1: return None
 
     if not calculate_heuristic:
         return (vertex0, vertex1), [(0, None, None)]
+    
+    # TODO: check heuristic function for gadgets and boundaries
 
     if vertex0_boundary and vertex0_needs_unfusion:
-        return (vertex0, vertex1), [(pivot_heuristic(graph,edge),-1,None)]
+        return (vertex0, vertex1), [(pivot_heuristic(graph,edge)-boundary_count,-1,None)]
     elif vertex1_boundary and vertex1_needs_unfusion:
-        return (vertex0, vertex1), [(pivot_heuristic(graph,edge),None,-1)]
+        return (vertex0, vertex1), [(pivot_heuristic(graph,edge)-boundary_count,None,-1)]
     
     # No need for unfusion or phase gadget
     if not vertex0_needs_unfusion and not vertex1_needs_unfusion:
-        return (vertex0, vertex1), [(pivot_heuristic(graph,edge),None,None)]
+        return (vertex0, vertex1), [(pivot_heuristic(graph,edge)-boundary_count,None,None)]
 
     matches = []
     if check_for_unfusions:
@@ -161,21 +163,19 @@ def check_pivot_match(graph, edge, check_for_unfusions=True, calculate_heuristic
             # Unfuse both vertices to all possible neighbors
             for neighbor_v0 in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
                 for neighbor_v1 in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
-                    matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor_v0,neighbor_v1),neighbor_v0,neighbor_v1))
+                    matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor_v0,neighbor_v1)-boundary_count,neighbor_v0,neighbor_v1))
         elif vertex0_needs_unfusion:
             # Unfuse vertex0 to all possible neighbors
-            for neighbor in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
-                matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,None,neighbor),None,neighbor))
+            for neighbor in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
+                matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor, None)-boundary_count,neighbor,None))
             # Phase gadget unfusion for vertex0
-            if not is_vertex_next_to_boundary(graph, vertex0) and not is_vertex_next_to_boundary(graph, vertex1):
-                matches.append((pivot_heuristic(graph,edge),None,-1))
+            matches.append((pivot_heuristic(graph,edge)-boundary_count,-1,None))
         elif vertex1_needs_unfusion:
             # Unfuse vertex1 to all possible neighbors
-            for neighbor in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
-                matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor,None),neighbor,None))
+            for neighbor in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
+                matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,None, neighbor)-boundary_count,None,neighbor))
             # Phase gadget unfusion for vertex1
-            if not is_vertex_next_to_boundary(graph, vertex0) and not is_vertex_next_to_boundary(graph, vertex1):
-                matches.append((pivot_heuristic(graph,edge),-1, None))
+            matches.append((pivot_heuristic(graph,edge)-boundary_count,None, -1))
         
     if matches:
         return (vertex0, vertex1), matches
@@ -380,7 +380,6 @@ def update_matches(
             if neighbor_of_neighbor not in vertex_neighbors:
                 neighbors_of_neighbors.add(neighbor_of_neighbor)
 
-    # TODO: check if correct with gadgets
     lcomp_matches = update_lcomp_matches(graph=graph, 
                                          vertex_neighbors=vertex_neighbors, 
                                          removed_vertices=removed_vertices, 
@@ -409,10 +408,10 @@ def update_matches(
 
 
 
-def get_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex, exclude_vertex=None):
+def get_possible_gflow_preserving_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex, exclude_vertex=None):
     """
     Get the possible neighbors for unfusion of a given vertex in a graph.
-    Only neighbors with 2 or less neighbors are considered.
+    Only neighbors with 2 or less neighbors are considered to preserve the G-flow.
 
     Parameters:
     graph (BaseGraph[VT,ET]): The graph to perform the operation on.
@@ -422,12 +421,12 @@ def get_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex, ex
     Returns:
     list: A list of vertices that are possible neighbors for unfusion.
     """
+    
     possible_unfusion_neighbours = set()
 
-    # TODO: check if the following is sensible to only select glfow preserving neighbors
     for neighbor in graph.neighbors(current_vertex):
         neighbors_of_neighbor = graph.neighbors(neighbor)
-        if len(neighbors_of_neighbor) <= 2:
+        if len(neighbors_of_neighbor) <= 2 and graph.type(neighbor) == VertexType.Z:
             possible_unfusion_neighbours.add(neighbor)
 
     if exclude_vertex and exclude_vertex in possible_unfusion_neighbours:
@@ -447,10 +446,7 @@ def get_all_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex
     Returns:
     list: A list of vertices that are possible neighbors for unfusion.
     """
-    if is_vertex_next_to_boundary(graph, current_vertex):
-        return set()
-
-    possible_unfusion_neighbours = set(graph.neighbors(current_vertex))
+    possible_unfusion_neighbours = set(neighbor for neighbor in graph.neighbors(current_vertex) if graph.type(neighbor) == VertexType.Z)
 
     if exclude_vertex and exclude_vertex in possible_unfusion_neighbours:
         possible_unfusion_neighbours.remove(exclude_vertex)
@@ -519,15 +515,15 @@ def apply_pivot(graph: BaseGraph[VT,ET], match: Tuple[Tuple[VT, VT], MatchPivotH
     vertex0_boundary = [vertex for vertex in vertex0_neighbors if graph.type(vertex) != VertexType.Z]
     vertex1_boundary = [vertex for vertex in vertex1_neighbors if graph.type(vertex) != VertexType.Z]
     
-    # if len(vertex0_boundary) + len(vertex1_boundary) > 1:
-    #     return None, None
-    # if unfusion_neighbors[vertex_0] in vertex0_boundary or unfusion_neighbors[vertex_1] in vertex1_boundary:
-    #     return None, None
+    if len(vertex0_boundary) + len(vertex1_boundary) > 1:
+        return None, None
+    if unfusion_neighbors[vertex_0] in vertex0_boundary or unfusion_neighbors[vertex_1] in vertex1_boundary:
+        return None, None
     
-    # if vertex0_boundary and (unfusion_neighbors[vertex_0] is not None and unfusion_neighbors[vertex_0] != -1):
-    #     return None, None
-    # if vertex1_boundary and (unfusion_neighbors[vertex_1] is not None and unfusion_neighbors[vertex_1] != -1):
-    #     return None, None
+    if vertex0_boundary and (unfusion_neighbors[vertex_0] is not None and unfusion_neighbors[vertex_0] != -1):
+        return None, None
+    if vertex1_boundary and (unfusion_neighbors[vertex_1] is not None and unfusion_neighbors[vertex_1] != -1):
+        return None, None
     
     new_vertices = []
     flow = {}
@@ -554,8 +550,8 @@ def apply_pivot(graph: BaseGraph[VT,ET], match: Tuple[Tuple[VT, VT], MatchPivotH
             was_neighbor_unfused = True
     
     time_to_apply_rule_start = time.perf_counter()
-    # apply_rule(graph, pivot, [(vertex_0, vertex_1, vertex0_boundary, vertex1_boundary)])
-    apply_rule(graph, pivot, [(vertex_0, vertex_1, [], [])])
+    apply_rule(graph, pivot, [(vertex_0, vertex_1, vertex0_boundary, vertex1_boundary)])
+    # apply_rule(graph, pivot, [(vertex_0, vertex_1, [], [])])
     time_dict["time_to_apply_rule"] = time.perf_counter() - time_to_apply_rule_start
     
     if was_neighbor_unfused:
@@ -769,7 +765,7 @@ class WireReducer:
         
         total_matches_info = {key: sum(value) for key, value in self._matches.items()}
         total_neighbor_unfusions_info = {key: sum(value) for key, value in self._neighbor_unfusions.items()}
-        logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Std reduction: {np.std(self._reduction_per_match)}")
+        logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Average reduction: {sum(self._reduction_per_match)/len(self._reduction_per_match)}")
         logging.info(f"Neighbor unfusions: {total_neighbor_unfusions_info}")
         logging.info(f"Matches: {total_matches_info}")
         logging.info(f"Number of vertices: {len(self.graph.vertex_set())}, Number of edges: {len(self.graph.edge_set())}")
@@ -812,12 +808,12 @@ class WireReducer:
         Returns:
             bool: True if the flow is preserved, False otherwise.
         """
-
+        #TODO: all unfusions with 0 or 1 neighbors are gflow preserving
         self._neighbor_unfusions["total"][-1] += 1
 
-        # v0, v1 = edge
-        # if len(graph.neighbors(v0)) == 1 or len(graph.neighbors(v1)) == 1:
-        #     self._neighbor_unfusions["gadgets"][-1] += 1
+        v0, v1 = edge
+        if len(graph.neighbors(v0)) == 1 or len(graph.neighbors(v1)) == 1:
+            self._neighbor_unfusions["gadgets"][-1] += 1
         
         if edge not in self._lookup_flow_for_unfusion:
             flow = self._calculate_flow(graph) is not None
@@ -1132,7 +1128,7 @@ class WireReducer:
         vertex_neighbors = set()
 
         #For testing purposes
-        # graph_copy = graph.clone()
+        graph_copy = graph.clone()
 
         flow_function = self._lookup_flow_preserving_for_edge if not skip_flow_calculation and self.use_neighbor_unfusion else None
 
@@ -1183,17 +1179,14 @@ class WireReducer:
             if is_match_unfusing(match):
                 self._matches["evaluated unfusion true"][-1] += 1
                 self._matches["total unfusion matches"][-1] += 1
-            # elif is_match_boundary(graph_copy, match):
-            #     self._matches["total boundary matches"][-1] += 1
-            #     self._matches["evaluated true"][-1] += 1
+            elif is_match_boundary(graph_copy, match):
+                self._matches["total boundary matches"][-1] += 1
+                self._matches["evaluated true"][-1] += 1
             else:
                 self._matches["evaluated true"][-1] += 1
                 self._matches["total matches"][-1] += 1
 
         removed_vertices = [key for key in match_key if key not in graph.vertex_set()]
-        # leftover_vertices = [vertex for vertex in match_key if vertex not in removed_vertices]
-        # vertex_neighbors = {vertex_neighbor for vertex in leftover_vertices for vertex_neighbor in graph.neighbors(vertex) if vertex_neighbor not in leftover_vertices}
-        
 
         return list(vertex_neighbors), removed_vertices
 
@@ -1413,17 +1406,6 @@ class WireReducer:
         """
 
         stop_search = False
-
-        # If the standard deviation over the last couple of local and pivot matches is too low, then we should stop
-        # if len(self._remaining_matches) >= 5:
-        #     last_matches = self._remaining_matches[-5:]
-        #     local_complement_results = [match[0] for match in last_matches]
-        #     pivot_results = [match[1] for match in last_matches]
-        #     if np.std(local_complement_results) < 1 and np.std(pivot_results) < 1:
-        #         self.has_changes_occurred = False
-        #         warnings.warn(f"Std of lcomp: {np.std(local_complement_results)} and pivot: {np.std(pivot_results)} is too low. Stopping.")
-        #         stop_search = True
-        #     logging.debug(f"Std of lcomp: {np.std(local_complement_results)} and pivot: {np.std(pivot_results)} of the last 5 matches")
 
         num_matches = 10
         if len(self._reduction_per_match) >= num_matches:
