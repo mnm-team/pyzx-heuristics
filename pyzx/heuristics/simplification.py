@@ -16,11 +16,10 @@ import numpy as np
 
 from .heuristics import PhaseType, get_phase_type, lcomp_heuristic, lcomp_heuristic_neighbor_unfusion, pivot_heuristic, pivot_heuristic_neighbor_unfusion
 from .tools import split_phases, insert_identity
-from .flow_calculation import cflow
+from .flow_calculation import identify_cflow, identify_gflow, identify_gflow_with_gadgets
 
 from pyzx.rules import apply_rule, lcomp, pivot
 from pyzx.utils import VertexType, EdgeType
-from pyzx.gflow import gflow
 from pyzx.graph.base import BaseGraph, VT, ET
 
 
@@ -168,14 +167,16 @@ def check_pivot_match(graph, edge, check_for_unfusions=True, calculate_heuristic
             # Unfuse vertex0 to all possible neighbors
             for neighbor in get_all_possible_unfusion_neighbours(graph, vertex0, vertex1):
                 matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,neighbor, None)-boundary_count,neighbor,None))
+            # FIXME: pivot heuristic does not seem to be correct for phase gadgets. It will calculate positive heuristic even if there is no reduction in wires.
+            # -1 to the heuristic value seems to work for now
             # Phase gadget unfusion for vertex0
-            matches.append((pivot_heuristic(graph,edge)-boundary_count,-1,None))
+            matches.append((pivot_heuristic(graph,edge)-boundary_count-1,-1,None))
         elif vertex1_needs_unfusion:
             # Unfuse vertex1 to all possible neighbors
             for neighbor in get_all_possible_unfusion_neighbours(graph, vertex1, vertex0):
                 matches.append((pivot_heuristic_neighbor_unfusion(graph,edge,None, neighbor)-boundary_count,None,neighbor))
             # Phase gadget unfusion for vertex1
-            matches.append((pivot_heuristic(graph,edge)-boundary_count,None, -1))
+            matches.append((pivot_heuristic(graph,edge)-boundary_count-1,None, -1))
         
     if matches:
         return (vertex0, vertex1), matches
@@ -477,6 +478,7 @@ def unfuse_to_neighbor(graph, current_vertex, neighbor_vertex, desired_phase):
 
         # TODO: check if this is correct. In rules.py no extra phaseless spieder is added
         phaseless_spider = insert_identity(graph, current_vertex, phase_spider)
+        # phaseless_spider = None
 
         return (phaseless_spider, phase_spider)
 
@@ -506,6 +508,10 @@ def apply_pivot(graph: BaseGraph[VT,ET], match: Tuple[Tuple[VT, VT], MatchPivotH
     """
     match_key, match_value = match
     vertex_0, vertex_1 = match_key
+
+    if graph.num_vertices() == 46 and graph.num_edges() == 58:
+        print("Before pivot")
+        print(graph)
     
     unfusion_neighbors = {vertex_0: match_value[1], vertex_1: match_value[2]}
     
@@ -534,6 +540,9 @@ def apply_pivot(graph: BaseGraph[VT,ET], match: Tuple[Tuple[VT, VT], MatchPivotH
     
     for vertex, unfusion_neighbor in unfusion_neighbors.items():
         if unfusion_neighbor:
+            if unfusion_neighbor == -1:
+                pass
+
             time_to_unfuse_start = time.perf_counter()
             phaseless_spider, phase_spider = unfuse_to_neighbor(graph, vertex, unfusion_neighbor, Fraction(0,1))
             if phaseless_spider: new_vertices.append(phaseless_spider) 
@@ -667,8 +676,9 @@ class FilterFlowFunc(Enum):
     An enumeration of the filter flow functions.
     """
     NONE = lambda _: {}
-    G_FLOW_PRESERVING = gflow
-    C_FLOW_PRESERVING = cflow
+    G_FLOW_PRESERVING = identify_gflow
+    C_FLOW_PRESERVING = identify_cflow
+    G_FLOW_PRESERVING_GADGET = identify_gflow_with_gadgets
 
     def __call__(self, *args, **kwargs):
         return self.value(*args, **kwargs)
@@ -741,12 +751,11 @@ class WireReducer:
             self._use_lookup_flow_for_unfusion = True
 
         if self.use_neighbor_unfusion and self.flow_function == FilterFlowFunc.NONE:
-            self.flow_function = FilterFlowFunc.G_FLOW_PRESERVING
+            self.flow_function = FilterFlowFunc.G_FLOW_PRESERVING_GADGET
             warnings.warn("Neighbor unfusion requires a flow function. Using G-flow preserving function.")
 
-        if not self.use_neighbor_unfusion and self.flow_function == FilterFlowFunc.G_FLOW_PRESERVING:
-            self.flow_function = FilterFlowFunc.NONE
-            warnings.warn("G-flow preserving function is not needed without neighbor unfusion. Using no flow function.")
+        if not self.use_neighbor_unfusion and (self.flow_function == FilterFlowFunc.G_FLOW_PRESERVING or self.flow_function == FilterFlowFunc.G_FLOW_PRESERVING_GADGET):
+            warnings.warn("G-flow preserving function is not needed without neighbor unfusion")
 
     def greedy_wire_reduce(self):
         self.has_changes_occurred = True
@@ -765,7 +774,7 @@ class WireReducer:
         
         total_matches_info = {key: sum(value) for key, value in self._matches.items()}
         total_neighbor_unfusions_info = {key: sum(value) for key, value in self._neighbor_unfusions.items()}
-        logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Average reduction: {sum(self._reduction_per_match)/len(self._reduction_per_match)}")
+        logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Average reduction: {sum(self._reduction_per_match)/len(self._reduction_per_match) if len(self._reduction_per_match) > 0 else 0}")
         logging.info(f"Neighbor unfusions: {total_neighbor_unfusions_info}")
         logging.info(f"Matches: {total_matches_info}")
         logging.info(f"Number of vertices: {len(self.graph.vertex_set())}, Number of edges: {len(self.graph.edge_set())}")
@@ -788,7 +797,7 @@ class WireReducer:
         
         total_matches_info = {key: sum(value) for key, value in self._matches.items()}
         total_neighbor_unfusions_info = {key: sum(value) for key, value in self._neighbor_unfusions.items()}
-        logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Std reduction: {np.std(self._reduction_per_match)}")
+        logging.info(f"Total rule applications: {self._rule_application_count}, Total reduction: {sum(self._reduction_per_match)}, Average reduction: {sum(self._reduction_per_match)/len(self._reduction_per_match) if len(self._reduction_per_match) > 0 else 0}")
         logging.info(f"Neighbor unfusions: {total_neighbor_unfusions_info}")
         logging.info(f"Matches: {total_matches_info}")
         return sum(self._reduction_per_match), self._applied_matches
@@ -886,12 +895,8 @@ class WireReducer:
         return flows
 
     def _calculate_flow(self, graph: BaseGraph[VT, ET]) -> Dict[VT, Set[VT]] | None:
-        if self.flow_function == FilterFlowFunc.G_FLOW_PRESERVING:
-            return self.flow_function(graph)[1] if self.flow_function(graph) else None
-        elif self.flow_function == FilterFlowFunc.C_FLOW_PRESERVING:
-            return self.flow_function(graph) if self.flow_function(graph) else None
-        else:
-            return self.flow_function(graph)
+        flow = self.flow_function(graph)
+        return flow if flow else None
 
     def _sort_matches(
             self, 
@@ -1430,6 +1435,8 @@ class WireReducer:
 
                 for best_key, best_result in matches_to_apply:
 
+                    number_of_edges_before = self.graph.num_edges()
+
                     match_result = self._apply_match(self.graph, (best_key, best_result), skip_flow_calculation=True)
 
                     if match_result is not None:
@@ -1440,7 +1447,7 @@ class WireReducer:
 
                     self.has_changes_occurred = True
                     self._rule_application_count += 1
-                    self._reduction_per_match.append(best_result[0])
+                    self._reduction_per_match.append(number_of_edges_before - self.graph.num_edges())
 
 
                     self._applied_matches.append((best_key, best_result))
@@ -1789,5 +1796,5 @@ def _sim_annealing_reduce(
 
         temperature *= cooling_rate
 
-    logging.info(f"Total rule applications: {len(applied_matches)}, Total reduction: {sum(reduction_per_match)}, Std reduction: {np.std(reduction_per_match)}")
+    logging.info(f"Total rule applications: {len(applied_matches)}, Total reduction: {sum(reduction_per_match)}, Average reduction: {sum(reduction_per_match)/len(reduction_per_match) if len(reduction_per_match) > 0 else 0}")
     return (sum(reduction_per_match), applied_matches)

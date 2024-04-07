@@ -60,7 +60,7 @@ def get_circuit_and_fr_graph(num_qubits: int = 5, depth: int = 50):
     return c, g_tele
 
 def generate_graph(num_qubits: int, depth: int) -> BaseGraph:
-    random.seed(1341)
+    random.seed(1343)
     g = zx.generate.cliffordT(qubits=num_qubits, depth=depth)
     to_graph_like(g)
 
@@ -225,25 +225,81 @@ class TestHeuristics():
         assert set([key[0] for key, values in lcomp_matches.items()]) == set([key for key, _ in zx_lcomp_matches])
         assert set([(key[0], key[1]) for key in pivot_matches.keys()]) == set([g.edge(key0, key1) for key0, key1, _, _ in zx_pivot_matches + zx_pivot_gadget_matches])
 
-    def test_phase_gadget(self):
-        g = generate_graph(5, 20)
+    def test_phase_gadget_extraction(self):
+        g = generate_graph(5, 30)
+        g_init = g.clone()
 
         pivot_matches = pivot_matcher(g, check_for_unfusions=True)
 
-        def get_first_match_with_gadget(pivot_matches):
+        def get_matches_with_gadget(pivot_matches):
+            matches = set()
             for match_key, match_values in pivot_matches.items():
                 for match_value in match_values:
                     pivot_heuritstic, unfusion0, unfusion1 = match_value
                     if unfusion0 and unfusion0 == -1:
-                        return match_key, match_value
+                        matches.add((match_key, match_value))
                     elif unfusion1 and unfusion1 == -1:
-                        return match_key, match_value
-            return None, None
+                        matches.add((match_key, match_value))
+            return list(matches)
         
-        match_key, match_value = get_first_match_with_gadget(pivot_matches)
+        def get_matches_without_gadget(pivot_matches):
+            matches = set()
+            for match_key, match_values in pivot_matches.items():
+                for match_value in match_values:
+                    pivot_heuritstic, unfusion0, unfusion1 = match_value
+                    # if unfusion0 and unfusion1:
+                    #     if unfusion0 != -1 and unfusion1 != -1:
+                    #         matches.add((match_key, match_value))
+                    # elif unfusion0:
+                    #     if unfusion0 != -1:
+                    #         matches.add((match_key, match_value))
+                    # elif unfusion1:
+                    #     if unfusion1 != -1:
+                    #         matches.add((match_key, match_value))
+                    if unfusion0 is None and unfusion1 is None:
+                        matches.add((match_key, match_value))
 
-        if match_key is not None:
-            apply_pivot(g, (match_key, match_value), FilterFlowFunc.G_FLOW_PRESERVING)
+            return list(matches)
+
+        def calculate_gflow(graph: BaseGraph, edge=None) -> bool:
+            g_clone = graph.clone()
+            flow_function = FilterFlowFunc.G_FLOW_PRESERVING_GADGET
+            flow = flow_function(g_clone)
+            flow = flow if flow else None
+            return flow is not None
+        
+        # pivots_without_gadget = get_matches_without_gadget(pivot_matches)
+        # apply_pivot(g, pivots_without_gadget[0], calculate_gflow)
+        
+        # is_graph_flow_preserving = calculate_gflow(g)
+        pivot_matches = pivot_matcher(g, check_for_unfusions=True)
+        matches = get_matches_with_gadget(pivot_matches)
+
+        match_to_apply = None
+        for match_key, match_value in matches:
+            g_try = g.clone()
+            unfusion_info, time_info = apply_pivot(g_try, (match_key, match_value), calculate_gflow)
+            if unfusion_info:
+                unfused_vertices, flow = unfusion_info
+                is_flow_preserving = all(flow.values())
+                if is_flow_preserving:
+                    match_to_apply = (match_key, match_value)
+                    break
+        
+        if match_to_apply:
+            apply_pivot(g, match_to_apply)
+        else:
+            raise Exception("No match to apply")
+
+        assert zx.compare_tensors(g_init, g)
+
+        # architecture = create_line_architecture(g.qubit_count())
+        # graph_simp = g.copy()
+        # new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
+
+        new_circuit = zx.extract_circuit(g.copy())
+
+        assert zx.compare_tensors(g_init, new_circuit)
         
 # if __name__ == '__main__':
 #     # pytest.main()

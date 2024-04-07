@@ -257,7 +257,8 @@ def pivot_heuristic_phase_gadget(graph: BaseGraph[VT,ET], edge, vertex_with_gadg
     vertex_v_neighbors.difference_update(shared_neighbors)
     connected_neighbors_count = 0
 
-    max_connections = num_vertex_u_neighbors * num_vertex_v_neighbors + num_vertex_u_neighbors * len(shared_neighbors) + num_vertex_v_neighbors * len(shared_neighbors) #maximal number of connections
+    # max_connections = num_vertex_u_neighbors * num_vertex_v_neighbors + num_vertex_u_neighbors * len(shared_neighbors) + num_vertex_v_neighbors * len(shared_neighbors) #maximal number of connections
+    max_connections = len(vertex_u_neighbors) * len(vertex_v_neighbors) + len(vertex_u_neighbors) * len(shared_neighbors) + len(vertex_v_neighbors) * len(shared_neighbors) #maximal number of connections
 
     for neighbor in vertex_u_neighbors:
         for neighbor2 in graph.neighbors(neighbor):
@@ -269,6 +270,19 @@ def pivot_heuristic_phase_gadget(graph: BaseGraph[VT,ET], edge, vertex_with_gadg
                 connected_neighbors_count += 1
     
     heuristic_result = 2*connected_neighbors_count - max_connections
+    phase_type1 = get_phase_type(graph.phases()[vertex_u])
+    phase_type2 = get_phase_type(graph.phases()[vertex_v])
+
     if debug:
-        print("connected_neighbors ",connected_neighbors_count,"max_connections ",max_connections, "vertex_u_neighbors ",vertex_u_neighbors, "vertex_v_neighbors ",vertex_v_neighbors,"shared_neighbors ",shared_neighbors)
-    return heuristic_result + len(graph.neighbors(vertex_u)) + len(graph.neighbors(vertex_v)) - 1
+        print("connected_neighbors ",connected_neighbors_count,"max_connections ",max_connections,"choice ",phase_type1.value+phase_type2.value*2)
+
+    if phase_type1 == PhaseType.CLIFFORD and phase_type2 == PhaseType.CLIFFORD:
+        return heuristic_result + len(graph.neighbors(vertex_u)) + len(graph.neighbors(vertex_v)) - 1
+    elif phase_type1 != PhaseType.CLIFFORD and phase_type2 == PhaseType.CLIFFORD:
+        return heuristic_result + len(graph.neighbors(vertex_v)) - 1
+    elif phase_type1 == PhaseType.CLIFFORD and phase_type2 != PhaseType.CLIFFORD:
+        return heuristic_result + len(graph.neighbors(vertex_u)) - 1
+    elif phase_type1 != PhaseType.CLIFFORD and phase_type2 != PhaseType.CLIFFORD:
+        return heuristic_result - 2
+    else:
+        return heuristic_result - 2
