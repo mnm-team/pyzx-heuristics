@@ -15,4 +15,5 @@ pyzx/js/d3.v5.js
 *~
 
 demos/heuristic_demos/graphs/*
+demos/heuristic_demos/benchmarks/*
 demos/heuristic_demos/*.csv
