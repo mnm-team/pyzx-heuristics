@@ -225,7 +225,7 @@ def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahe
     The heuristic is based on the number of edges that are removed in the simplification.
     """
     final_matches = []
-    # spider_simp(g, quiet=quiet, stats=stats)
+    spider_simp(g, quiet=quiet, stats=stats)
     to_gh(g)
     iteration_count = 0
     max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
@@ -237,9 +237,6 @@ def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahe
         if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
             id_simp_count = id_simp(g, quiet=quiet, stats=stats)
             spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
-
-        if flow_function(g) is None:
-            raise Exception("Flow function failed")
         
         greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=False, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, use_phase_gadgets=use_phase_gadgets, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
