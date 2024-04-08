@@ -1,10 +1,17 @@
+import json
+import random
 import sys
 
 from pathlib import Path
+from typing import List
+import uuid
+import warnings
 
-print(Path(__file__).parent.parent.parent)
-if Path(__file__).parent.parent.parent not in sys.path:
-    sys.path.append(str(Path(__file__).parent.parent.parent))
+import numpy as np
+
+project_path = Path(__file__).parent.parent.parent
+if project_path not in sys.path:
+    sys.path.append(str(project_path))
 
 import time
 
@@ -23,75 +30,70 @@ from pyzx.circuit.gates import CZ, Gate, ZPhase
 from pyzx.optimize import Optimizer, toggle_element
 from pyzx.heuristics.simplification import FilterFlowFunc
 
+path_to_circuits = project_path / 'circuits\\qasm'
+
+unique_id = uuid.uuid4().hex
+path_to_current_run = project_path / 'demos\\heuristic_demos\\benchmarks' / unique_id
+path_to_current_run.mkdir(parents=False, exist_ok=False)
+
+path_to_graphs = path_to_current_run / 'graphs'
+path_to_graphs.mkdir(parents=False, exist_ok=True)
+
+logging.basicConfig(filename=path_to_current_run / 'log.log',
+                    filemode='a',
+                    format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                    datefmt='%H:%M:%S',
+                    level=logging.DEBUG)
+
+logger = logging.getLogger('Greedy_Benchmark')
+seed = 0
+random.seed(seed)
 
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-path_to_circuits = 'c:\\Users\\wsajk\\Documents\\Arbeit\\MUNIQC-Atoms\\pyzx-heuristics\\circuits\\qasm\\'
-input_data = {"Name": [], "circuit": [], "graph": []}
-dataframes = []
+def load_circuits(path_to_circuits:Path, circuit_names:str|List[str]|None):
 
-gates = []
-t_count = []
-cliffords = []
-cnot = []
-other = []
-hadamard = []
-times = []
+    input_data = {"Name": [], "circuit": [], "graph": []}
+    output_data = {"gates": [], "t_count": [], "cliffords": [], "cnot": [], "other": [], "hadamard": [], "verticies": [], "edges": [], "time": []}
 
-for file in Path(path_to_circuits).glob('*.qasm'):
-    circuit = zx.Circuit.load(file).to_basic_gates()
-    # if circuit.qubits <= 19 and circuit.qubits >= 8 and len(circuit.gates) <= 5000 and len(circuit.gates) >= 100:
+    for file in path_to_circuits.glob('*.qasm'):
+        circuit = zx.Circuit.load(file).to_basic_gates()
+        # if circuit.qubits <= 19 and circuit.qubits >= 8 and len(circuit.gates) <= 5000 and len(circuit.gates) >= 100:
+        if circuit_names is None:
+            circuits = ["barenco_tof_3", "gf2^6_mult", "tof_10", "mod_red_21", "gf2^5_mult"]
+        elif isinstance(circuit_names, list):
+            circuits = circuit_names
+        else:
+            circuits = [circuit_names]
 
-    if file.stem == "tof_10" or file.stem == "mod_red_21" or file.stem == "gf2^5_mult" or file.stem == "gf2^6_mult" or file.stem == "barenco_tof_3":
-        try:
-            circuit = zx.optimize.basic_optimization(circuit)
-        except Exception as e:
-            pass
-        graph = circuit.to_graph()
-        graph = graph.copy()
+        if file.stem in circuits:
+            
+            try:
+                circuit = zx.optimize.basic_optimization(circuit)
+            except Exception as e:
+                pass
+            graph = circuit.to_graph()
+            graph = graph.copy()
 
-        input_data["Name"].append(file.stem)
-        input_data["circuit"].append(circuit)
-        input_data["graph"].append(circuit.to_graph())
-        logging.info(f"Loaded {file.stem}")
-        logging.info(circuit.stats())
+            input_data["Name"].append(file.stem)
+            input_data["circuit"].append(circuit)
+            input_data["graph"].append(circuit.to_graph())
+            logger.info(f"Loaded {file.stem}")
+            logging.info(circuit.stats())
 
-        numbers = re.findall(r'\d+', circuit.stats())
+            numbers = re.findall(r'\d+', circuit.stats())
 
-        # Assign the numbers to variables
-        gates.append(int(numbers[1]))
-        t_count.append(int(numbers[2]))
-        cliffords.append(int(numbers[3]))
-        cnot.append(int(numbers[6]))
-        other.append(int(numbers[7]))
-        hadamard.append(int(numbers[8]))
-        times.append(0)
+            # Assign the numbers to variables
+            output_data["gates"].append(int(numbers[1]))
+            output_data["t_count"].append(int(numbers[2]))
+            output_data["cliffords"].append(int(numbers[3]))
+            output_data["cnot"].append(int(numbers[6]))
+            output_data["other"].append(int(numbers[7]))
+            output_data["hadamard"].append(int(numbers[8]))
+            output_data["verticies"].append(graph.num_vertices())
+            output_data["edges"].append(graph.num_edges())
+            output_data["time"].append(0)
 
-# Define the column names
-columns = input_data["Name"]
-
-# Define the row labels
-rows = ["Gates", "T-Count", "Cliffords", "CNOTS", "Other 2 Qubit Gates", "Hadamard", "Time"]
-
-lookahead = list(range(0, 2))
-
-threshold = 1
-
-# Define the algorithm
-algorithms = {
-    "OR": None,
-    "TR": zx.simplify.teleport_reduce,
-    "FR": zx.simplify.full_reduce,
-    **{f"G{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold) for la in lookahead},
-    **{f"GN{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold) for la in lookahead},
-    **{f"G_CFlow{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
-    **{f"GN_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead}
-}
-
-data = [gates, t_count, cliffords, cnot, other, hadamard, times]
-dataframes.append(pd.DataFrame(data, columns=columns, index=rows))
-
+    return input_data, output_data
 
 def basic_optimization_min_cnots(circuit: Circuit, do_swaps:bool=True, quiet:bool=True) -> Circuit:
     """Optimizes the circuit using a strategy that involves delayed placement of gates
@@ -233,17 +235,11 @@ class Optimizer_no_new_cnots(Optimizer):
         else:
             raise TypeError("Unknown gate {}".format(str(g)))
 
-def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool = True):
+def run_algorithm(algorithm, input_data, algorithm_name, pre_tr:bool = True):
     
-    gates = []
-    t_count = []
-    cliffords = []
-    cnot = []
-    other = []
-    hadamard = []
-    times = []
+    output_data = {"gates": [], "t_count": [], "cliffords": [], "cnot": [], "other": [], "hadamard": [], "verticies": [], "edges": [], "time": []}
 
-    for name, circuit, graph in zip(input_data["Name"], input_data["circuit"], input_data["graph"]):
+    for name, graph in zip(input_data["Name"], input_data["graph"]):
         graph_simplified = graph.clone()
         if pre_tr:
             graph_simplified = zx.simplify.teleport_reduce(graph_simplified)
@@ -251,41 +247,100 @@ def run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr:bool
             
         logging.info(f"Running {algorithm} on {name}")
 
-        start = time.perf_counter()
-        algorithm(graph_simplified)
-        end = time.perf_counter() - start
+        algorithm_failed = False
 
-        with open(f"{Path(__file__).parent}/graphs/{name}_{algorithm_name}.json", 'w') as f:
-            f.write(graph_simplified.to_json())
+        start = time.perf_counter()
+        try:
+            algorithm(graph_simplified)
+            with open(f"{path_to_graphs}/{name}_{algorithm_name}.json", 'w') as f:
+                f.write(graph_simplified.to_json())
+        except Exception:
+            algorithm_failed = True
+            warnings.warn(f"Failed to run {algorithm_name} on {name}")
+
+        end = time.perf_counter() - start
 
         logging.info(f"Finished execution in {end} seconds")
 
-        qc = zx.extract_circuit(graph_simplified)
-        try:
-            # qc = basic_optimization_min_cnots(qc.to_basic_gates())
-            qc = zx.optimize.basic_optimization(qc.to_basic_gates())
-        except Exception as e:
-            raise e
+        if not algorithm_failed:
+            try:
+                qc = zx.extract_circuit(graph_simplified)
+                # qc = basic_optimization_min_cnots(qc.to_basic_gates())
+                qc = zx.optimize.basic_optimization(qc.to_basic_gates())
 
-        stats = qc.stats()
-        logging.info(f"Stats for {algorithm} on {name}:")
-        logging.info(stats)
-        # Extract the numbers
-        numbers = re.findall(r'\d+', stats)
+                stats = qc.stats()
+                logging.info(f"Stats for {algorithm} on {name}:")
+                logging.info(stats+"\n")
+                # Extract the numbers
+                numbers = re.findall(r'\d+', stats)
 
-        # Assign the numbers to variables
-        gates.append(int(numbers[1]))
-        t_count.append(int(numbers[2]))
-        cliffords.append(int(numbers[3]))
-        cnot.append(int(numbers[6]))
-        other.append(int(numbers[7]))
-        hadamard.append(int(numbers[8]))
-        times.append(int(end))
+                output_data["gates"].append(int(numbers[1]))
+                output_data["t_count"].append(int(numbers[2]))
+                output_data["cliffords"].append(int(numbers[3]))
+                output_data["cnot"].append(int(numbers[6]))
+                output_data["other"].append(int(numbers[7]))
+                output_data["hadamard"].append(int(numbers[8]))
+            except Exception:
 
-    data = [gates, t_count, cliffords, cnot, other, hadamard, times]
-    dataframes.append(pd.DataFrame(data, columns=columns, index=rows))
+                warnings.warn(f"Failed to extract circuit from {name} after {algorithm_name} simplification")
+                output_data["gates"].append(np.nan)
+                output_data["t_count"].append(np.nan)
+                output_data["cliffords"].append(np.nan)
+                output_data["cnot"].append(np.nan)
+                output_data["other"].append(np.nan)
+                output_data["hadamard"].append(np.nan)
+
+            output_data["verticies"].append(graph_simplified.num_vertices())
+            output_data["edges"].append(graph_simplified.num_edges())
+            output_data["time"].append(end)
+        else:
+            output_data["gates"].append(np.nan)
+            output_data["t_count"].append(np.nan)
+            output_data["cliffords"].append(np.nan)
+            output_data["cnot"].append(np.nan)
+            output_data["other"].append(np.nan)
+            output_data["hadamard"].append(np.nan)
+            output_data["verticies"].append(np.nan)
+            output_data["edges"].append(np.nan)
+            output_data["time"].append(end)
+
+    return output_data
 
 
+dataframes = []
+
+# Load the circuits and get original data
+input_data, output_data_or = load_circuits(path_to_circuits, None)
+
+# Define the column names
+columns = input_data["Name"]
+
+# Define the row labels
+rows = list(output_data_or.keys())
+
+# Add original data to the dataframe
+dataframes.append(pd.DataFrame(list(output_data_or.values()), columns=columns, index=rows))
+
+
+
+
+lookahead = list(range(0, 2))
+threshold = 1
+
+# Define the algorithms
+algorithms = {
+    "OR": None,
+    "TR": zx.simplify.teleport_reduce,
+    "FR": zx.simplify.full_reduce,
+    **{f"G{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_phase_gadgets=False) for la in lookahead},
+    **{f"GN{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_phase_gadgets=False) for la in lookahead},
+    **{f"GN_PG{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_phase_gadgets=True) for la in lookahead},
+    **{f"G_CFlow{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_phase_gadgets=False, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
+    **{f"GN_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_phase_gadgets=False, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
+    **{f"GN_PG_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_phase_gadgets=True, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead}
+}
+
+#FIXME: There seems to be an error. Some neighbor unfusion algorithms are way faster than other without apperent reason. eg. GN1 and GN_PG1 for gf2^5_mult: ~70s vs ~1500s
 for algorithm_name, algorithm in algorithms.items():
     if algorithm is None:
         continue
@@ -294,7 +349,27 @@ for algorithm_name, algorithm in algorithms.items():
     else:
         pre_tr = True
 
-    run_algorithm(algorithm, input_data, dataframes, algorithm_name, pre_tr=pre_tr)
+    # Run the algorithm and get the output data
+    output_data = run_algorithm(algorithm, input_data, algorithm_name, pre_tr=pre_tr)
+    # Add the output data to the dataframe
+    dataframes.append(pd.DataFrame(list(output_data.values()), columns=columns, index=rows))
 
+# Concatenate the dataframes and save them to a csv file
 df = pd.concat(dataframes, axis=0, keys=algorithms.keys())
-df.to_csv('benchmark_greedy.csv')
+df.to_csv(path_to_current_run / 'benchmark_greedy.csv')
+
+# Save the metadata
+run_meta_data = {
+    "unique_id": unique_id,
+    "seed": seed,
+    "lookahead": lookahead,
+    "threshold": threshold,
+    "algorithms": list(algorithms.keys()),
+    "columns": columns,
+    "rows": rows,
+    "path_to_circuits": str(path_to_circuits),
+    "date": time.strftime("%Y-%m-%d %H:%M:%S")
+}
+
+with open(f"{path_to_current_run}/metadata.json", 'w') as f:
+    f.write(json.dumps(run_meta_data, indent=4))

@@ -26,6 +26,7 @@ def get_phase_type(phase):
         return PhaseType.NON_CLIFFORD
 
 
+#TODO: Add test to check if heuritsics acutally reduce the number of edges in the graph by the right amount
 
 def lcomp_heuristic(graph: BaseGraph[VT,ET], target_vertex, debug=False):
     """

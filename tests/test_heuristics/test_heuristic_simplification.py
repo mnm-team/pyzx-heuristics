@@ -123,7 +123,7 @@ class TestHeuristics():
             zx.simplify.teleport_reduce(simplified_graph, quiet=True)
 
             # Apply the greedy simplification
-            zx.simplify.greedy_simp(simplified_graph, lookahead=la, quiet=True)
+            zx.simplify.greedy_simp(simplified_graph, lookahead=la, use_phase_gadgets=True, quiet=True)
 
             new_circuit = zx.extract_circuit(simplified_graph)
 
@@ -140,7 +140,7 @@ class TestHeuristics():
                 zx.simplify.teleport_reduce(simplified_graph, quiet=True)
 
                 # Apply the greedy simplification
-                zx.simplify.greedy_simp_neighbors(simplified_graph, lookahead=la, quiet=True)
+                zx.simplify.greedy_simp_neighbors(simplified_graph, lookahead=la, use_phase_gadgets=True, quiet=True)
 
                 new_circuit = zx.extract_circuit(simplified_graph)
 
@@ -159,8 +159,8 @@ class TestHeuristics():
             # Apply the greedy simplification
             g_simp = simplified_graph.copy()
             g_simp_nu = simplified_graph.copy()
-            zx.simplify.greedy_simp(g_simp, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, quiet=True)
-            zx.simplify.greedy_simp_neighbors(g_simp_nu, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, quiet=True)
+            zx.simplify.greedy_simp(g_simp, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, use_phase_gadgets=True, quiet=True)
+            zx.simplify.greedy_simp_neighbors(g_simp_nu, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, use_phase_gadgets=True, quiet=True)
 
             new_circuit_simp = zx.extract_circuit(g_simp)
             new_circuit_simp_nu = zx.extract_circuit(g_simp_nu)
@@ -229,7 +229,7 @@ class TestHeuristics():
         g = generate_graph(5, 30)
         g_init = g.clone()
 
-        pivot_matches = pivot_matcher(g, check_for_unfusions=True)
+        pivot_matches = pivot_matcher(g, check_for_unfusions=True, check_for_phase_gadgets=True)
 
         def get_matches_with_gadget(pivot_matches):
             matches = set()
@@ -272,7 +272,7 @@ class TestHeuristics():
         # apply_pivot(g, pivots_without_gadget[0], calculate_gflow)
         
         # is_graph_flow_preserving = calculate_gflow(g)
-        pivot_matches = pivot_matcher(g, check_for_unfusions=True)
+        pivot_matches = pivot_matcher(g, check_for_unfusions=True, check_for_phase_gadgets=True)
         matches = get_matches_with_gadget(pivot_matches)
 
         match_to_apply = None

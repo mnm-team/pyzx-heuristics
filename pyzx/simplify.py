@@ -218,13 +218,14 @@ def teleport_reduce(g: BaseGraph[VT,ET], quiet:bool=True, stats:Optional[Stats]=
     s.full_reduce(quiet=quiet, stats=stats)
     return s.mastergraph
 
-def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+# TODO: update function calls in other files to use new parameters for greedy_simp and greedy_simp_neighbors
+def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, use_phase_gadgets=False, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`greedy_wire_reduce` to achieve a greedy simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
     """
     final_matches = []
-    spider_simp(g, quiet=quiet, stats=stats)
+    # spider_simp(g, quiet=quiet, stats=stats)
     to_gh(g)
     iteration_count = 0
     max_vertex_index = len(g.vertex_set()) if max_vertex_index else None
@@ -232,11 +233,15 @@ def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahe
         #TODO: test if the flow function is still valid after each simplification step
         id_simp_count = 0
         spider_simp_count = 0
+
         if flow_function != FilterFlowFunc.C_FLOW_PRESERVING:
             id_simp_count = id_simp(g, quiet=quiet, stats=stats)
             spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
+
+        if flow_function(g) is None:
+            raise Exception("Flow function failed")
         
-        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=False, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
+        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=False, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, use_phase_gadgets=use_phase_gadgets, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
             final_matches = applied_matches
             #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
@@ -249,7 +254,7 @@ def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahe
         iteration_count += 1
     return iteration_count, final_matches
 
-def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, use_phase_gadgets=False, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`greedy_wire_reduce` to achieve a greedy simplification of the graph including neighbor unfusion.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -267,13 +272,13 @@ def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=
             id_simp_count = id_simp(g, quiet=quiet, stats=stats)
             spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
         
-        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=True, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
+        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=True, use_phase_gadgets=use_phase_gadgets, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
             final_matches = applied_matches
             #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
 
-        # if not filter_flow_func(g):
-        #     raise Exception("Flow function failed")
+        if flow_function(g) is None:
+            raise Exception("Flow function failed")
         
         # if greedy_wire_reduce_count == 0: break
         if id_simp_count + spider_simp_count + greedy_wire_reduce_count == 0: break
