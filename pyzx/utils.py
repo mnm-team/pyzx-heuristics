@@ -114,6 +114,12 @@ def phase_is_clifford(phase: FractionLike):
         return phase in [Fraction(i, 2) for i in range(4)]
     else:
         return phase.is_clifford
+    
+def phase_is_true_clifford(phase: FractionLike):
+    if isinstance(phase, (Fraction, int)):
+        return phase in [Fraction(1,2), Fraction(-1,2), Fraction(3,2)]
+    else:
+        raise NotImplementedError("Poly phase is not implemented yet")
 
 def phase_is_pauli(phase: FractionLike):
     if isinstance(phase, (Fraction, int)):

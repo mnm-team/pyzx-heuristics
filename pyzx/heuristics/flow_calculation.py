@@ -3,7 +3,7 @@ import itertools
 from typing import Dict, Final, List, Literal, Optional, Set, Tuple
 from pyzx.graph.base import BaseGraph, VT, ET, EdgeType
 from pyzx.linalg import CNOTMaker, Mat2
-from pyzx.utils import VertexType
+from pyzx.utils import VertexType, phase_is_true_clifford
 
 def calculate_lcomp(graph: BaseGraph[VT,ET], vertex: VT):
   """
@@ -389,7 +389,7 @@ def get_measurement_types(graph: BaseGraph[VT,ET]):
     neighbors = list(graph.neighbors(vertex))
     num_neighbors = len(neighbors)
     if num_neighbors == 1 and graph.type(vertex=vertex) != VertexType.BOUNDARY and graph.edge_type(graph.edge(vertex, neighbors[0])) == EdgeType.HADAMARD:
-      if graph.phase(neighbors[0]) == Fraction(1,2):
+      if phase_is_true_clifford(graph.phase(neighbors[0])):
         measurements[vertex] = MeasurementType.EFFECT
         measurements[neighbors[0]] = MeasurementType.XZ
       else:

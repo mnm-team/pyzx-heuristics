@@ -12,16 +12,14 @@ def split_phases(orig_phase: Fraction, desired_phase: Fraction):
     orig_phase_n = int(orig_phase.numerator*(extend_denom/orig_phase.denominator))
     desired_phase_n = int(desired_phase.numerator*(extend_denom/desired_phase.denominator))
     return Fraction( int((orig_phase_n- desired_phase_n) % (extend_denom*2)), extend_denom)
-
-
-'''
-inserts hadamard wire + empty Z + hadamard wire between two vertices.
-This does not change the standard interpretation, as two hadamards are equal to the identity
-and the empty z spider as well
-CAUTION: may break gflow property of graph if applied to the wrong vertices (see heuristics/get_possible_unfusion_neighbours)
-'''
     
 def insert_identity(g, v1, v2) -> int:
+    '''
+    inserts hadamard wire + empty Z + hadamard wire between two vertices.
+    This does not change the standard interpretation, as two hadamards are equal to the identity
+    and the empty z spider as well
+    CAUTION: may break gflow property of graph if applied to the wrong vertices (see heuristics/get_possible_unfusion_neighbours)
+    '''
     orig_type = g.edge_type(g.edge(v1, v2))
     if g.connected(v1, v2):
         g.remove_edge(g.edge(v1, v2))

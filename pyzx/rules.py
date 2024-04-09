@@ -739,6 +739,63 @@ def lcomp(g: BaseGraph[VT,ET], matches: List[MatchLcompType[VT]]) -> RewriteOutp
 
     return (etab, rem, [], True)
 
+def insert_identity(g, v1, v2) -> int:
+    '''
+    inserts hadamard wire + empty Z + hadamard wire between two vertices.
+    This does not change the standard interpretation, as two hadamards are equal to the identity
+    and the empty z spider as well
+    CAUTION: may break gflow property of graph if applied to the wrong vertices (see heuristics/get_possible_unfusion_neighbours)
+    '''
+    orig_type = g.edge_type(g.edge(v1, v2))
+    if g.connected(v1, v2):
+        g.remove_edge(g.edge(v1, v2))
+    vmid = g.add_vertex(VertexType.Z,-1,g.rows()[v1])
+    g.add_edge((v1,vmid), EdgeType.HADAMARD)
+    if orig_type == EdgeType.HADAMARD:
+        g.add_edge((vmid,v2), EdgeType.SIMPLE)
+    else:
+        g.add_edge((vmid,v2), EdgeType.HADAMARD)
+    return vmid
+
+#FIXME: Here no new vertex should be added. Instead the current vertex should be used as the new vertex (so no vertex is removed) in case of a boundary match.
+def lcomp_with_boundaries(g: BaseGraph[VT,ET], matches: List[MatchLcompType[VT]]) -> RewriteOutputType[ET,VT]:
+    """Performs a local complementation based rewrite rule on the given graph with the
+    given ``matches`` returned from ``match_lcomp(_parallel)``. See "Graph Theoretic
+    Simplification of Quantum Circuits using the ZX calculus" (arXiv:1902.03178)
+    for more details on the rewrite"""
+    etab: Dict[ET,List[int]] = dict()
+    rem = []
+    for m in matches:
+
+        boundary = [n for n in m[1] if g.type(n) == VertexType.BOUNDARY]
+        neighbors_without_boundary = [n for n in m[1] if g.type(n) != VertexType.BOUNDARY]
+
+        a = g.phase(m[0])
+        assert isinstance(a,Fraction)  # For mypy
+        if a.numerator == 1: g.scalar.add_phase(Fraction(1,4))
+        else: g.scalar.add_phase(Fraction(7,4))
+
+        rem.append(m[0])
+
+        if len(boundary) > 1:
+            raise ValueError("Too many boundaries in local complementation")
+        elif len(boundary) != 0:
+            phaseless_vertex = insert_identity(g, m[0], boundary[0])
+            neighbors_without_boundary.append(phaseless_vertex)
+
+        n = len(neighbors_without_boundary)
+        g.scalar.add_power((n-2)*(n-1)//2)
+        for i in range(n):
+            if not g.is_ground(neighbors_without_boundary[i]):
+                g.add_to_phase(neighbors_without_boundary[i], -a)
+            for j in range(i+1, n):
+                e = g.edge(neighbors_without_boundary[i],neighbors_without_boundary[j])
+                he = etab.get(e, [0,0])[1]
+                etab[e] = [0, he+1]
+
+    return (etab, rem, [], True)
+
+
 MatchIdType = Tuple[VT,VT,VT,EdgeType.Type]
 
 def match_ids(g: BaseGraph[VT,ET]) -> List[MatchIdType[VT]]:

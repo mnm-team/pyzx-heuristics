@@ -23,10 +23,10 @@ import itertools
 from pyzx.routing.architecture import Architecture
 from pyzx.routing.cnot_mapper import ElimMode, gauss
 
-from .utils import EdgeType, VertexType, toggle_edge
+from .utils import EdgeType, VertexType, phase_is_true_clifford, toggle_edge
 from .linalg import Mat2, Z2
 from .simplify import id_simp, tcount,full_reduce
-from .rules import apply_rule, pivot, match_spider_parallel, spider
+from .rules import apply_rule, pivot, match_spider_parallel, spider, lcomp, lcomp_with_boundaries
 from .circuit import Circuit
 from .circuit.gates import Gate, ParityPhase, CNOT, HAD, ZPhase, XPhase, CZ, XCX, SWAP, InitAncilla
 
@@ -614,11 +614,15 @@ def remove_gadget(g: BaseGraph[VT, ET], frontier: List[VT], qubit_map: Dict[VT, 
         if w not in gadgets: continue
         for v in g.neighbors(w):
             if v in frontier:
-                apply_rule(g, pivot, [(w, v, [], [o for o in g.neighbors(v) if o in outputs])])  # type: ignore
-                frontier.remove(v)
+                if phase_is_true_clifford(g.phase(w)):
+                    apply_rule(g, lcomp_with_boundaries, [(w, list(g.neighbors(w)))])  # type: ignore
+                else:
+                    apply_rule(g, pivot, [(w, v, [], [o for o in g.neighbors(v) if o in outputs])])  # type: ignore
+                    frontier.remove(v)
+                    frontier.append(w)
+                    qubit_map[w] = qubit_map[v]
+
                 del gadgets[w]
-                frontier.append(w)
-                qubit_map[w] = qubit_map[v]
                 removed_gadget = True
                 break
     return removed_gadget

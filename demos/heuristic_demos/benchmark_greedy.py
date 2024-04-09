@@ -46,7 +46,7 @@ logging.basicConfig(filename=path_to_current_run / 'log.log',
                     level=logging.DEBUG)
 
 logger = logging.getLogger('Greedy_Benchmark')
-seed = 0
+seed = 1332
 random.seed(seed)
 
 
@@ -257,6 +257,7 @@ def run_algorithm(algorithm, input_data, algorithm_name, pre_tr:bool = True):
         except Exception:
             algorithm_failed = True
             warnings.warn(f"Failed to run {algorithm_name} on {name}")
+            logging.warning(f"Failed to run {algorithm_name} on {name}")
 
         end = time.perf_counter() - start
 
@@ -283,6 +284,7 @@ def run_algorithm(algorithm, input_data, algorithm_name, pre_tr:bool = True):
             except Exception:
 
                 warnings.warn(f"Failed to extract circuit from {name} after {algorithm_name} simplification")
+                logging.warning(f"Failed to extract circuit from {name} after {algorithm_name} simplification")
                 output_data["gates"].append(np.nan)
                 output_data["t_count"].append(np.nan)
                 output_data["cliffords"].append(np.nan)
@@ -292,7 +294,7 @@ def run_algorithm(algorithm, input_data, algorithm_name, pre_tr:bool = True):
 
             output_data["verticies"].append(graph_simplified.num_vertices())
             output_data["edges"].append(graph_simplified.num_edges())
-            output_data["time"].append(end)
+            output_data["time"].append(int(end))
         else:
             output_data["gates"].append(np.nan)
             output_data["t_count"].append(np.nan)
@@ -302,15 +304,18 @@ def run_algorithm(algorithm, input_data, algorithm_name, pre_tr:bool = True):
             output_data["hadamard"].append(np.nan)
             output_data["verticies"].append(np.nan)
             output_data["edges"].append(np.nan)
-            output_data["time"].append(end)
+            output_data["time"].append(int(end))
 
     return output_data
 
 
 dataframes = []
 
+# circuits = ["barenco_tof_3", "gf2^6_mult", "tof_10", "mod_red_21", "gf2^5_mult"]
+circuits = ["barenco_tof_3"]
+
 # Load the circuits and get original data
-input_data, output_data_or = load_circuits(path_to_circuits, None)
+input_data, output_data_or = load_circuits(path_to_circuits, circuits)
 
 # Define the column names
 columns = input_data["Name"]
@@ -318,8 +323,10 @@ columns = input_data["Name"]
 # Define the row labels
 rows = list(output_data_or.keys())
 
+data = list(output_data_or.values())
+
 # Add original data to the dataframe
-dataframes.append(pd.DataFrame(list(output_data_or.values()), columns=columns, index=rows))
+dataframes.append(pd.DataFrame(data, columns=columns, index=rows))
 
 
 

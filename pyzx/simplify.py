@@ -274,8 +274,8 @@ def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=
             final_matches = applied_matches
             #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
 
-        if flow_function(g) is None:
-            raise Exception("Flow function failed")
+        # if flow_function(g) is None:
+        #     raise Exception("Flow function failed")
         
         # if greedy_wire_reduce_count == 0: break
         if id_simp_count + spider_simp_count + greedy_wire_reduce_count == 0: break

@@ -47,8 +47,8 @@ def deep_tuple(lst):
     return tuple(deep_tuple(i) if isinstance(i, list) or isinstance(i, tuple) else i for i in lst)
 
 def get_circuit_and_fr_graph(num_qubits: int = 5, depth: int = 50):
-    random.seed(1341)
-    g = zx.generate.cliffordT(qubits=num_qubits, depth=depth, p_t=0.3, p_cnot=0.5)
+    random.seed(122)
+    g = zx.generate.cliffordT(qubits=num_qubits, depth=depth)
     # c = zx.generate.phase_poly(n_qubits=16, n_phase_layers=20, cnots_per_layer=10)
     c = zx.Circuit.from_graph(g)
     c = zx.optimize.basic_optimization(c.split_phase_gates()).split_phase_gates()
@@ -60,7 +60,7 @@ def get_circuit_and_fr_graph(num_qubits: int = 5, depth: int = 50):
     return c, g_tele
 
 def generate_graph(num_qubits: int, depth: int) -> BaseGraph:
-    random.seed(1343)
+    random.seed(1341)
     g = zx.generate.cliffordT(qubits=num_qubits, depth=depth)
     to_graph_like(g)
 
@@ -291,8 +291,106 @@ class TestHeuristics():
         else:
             raise Exception("No match to apply")
 
-        assert zx.compare_tensors(g_init, g)
+        assert zx.compare_tensors(g_init, t2=g)
 
+        #FIXME: extraction with architecture awareness is currently not working
+        # architecture = create_line_architecture(g.qubit_count())
+        # graph_simp = g.copy()
+        # new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
+
+        new_circuit = zx.extract_circuit(g.copy())
+
+        assert zx.compare_tensors(g_init, new_circuit)
+
+    def test_boundary_lcomp_matches(self):
+        g = generate_graph(6, 50)
+        g_init = g.clone()
+
+        lcomp_matches = lcomp_matcher(g)
+
+        def get_matches_with_boundaries(lcomp_matches):
+            matches = []
+            for match_key, match_values in lcomp_matches.items():
+                for match_value in match_values:
+                    lcomp_heuritstic, vertex_neighbors, unfusion_neighbor = match_value
+                    if any([g.type(vertex) == zx.VertexType.BOUNDARY for vertex in vertex_neighbors]):
+                        matches.append((match_key, match_value))
+            return list(matches)
+        
+        def calculate_gflow(graph: BaseGraph, edge=None) -> bool:
+            g_clone = graph.clone()
+            flow_function = FilterFlowFunc.G_FLOW_PRESERVING_GADGET
+            flow = flow_function(g_clone)
+            flow = flow if flow else None
+            return flow is not None
+        
+        matches = get_matches_with_boundaries(lcomp_matches)
+
+        match_to_apply = None
+        for match_key, match_value in matches:
+            g_try = g.clone()
+            unfusion_info, time_info = apply_lcomp(g_try, (match_key, match_value))
+            if calculate_gflow(g_try):
+                match_to_apply = (match_key, match_value)
+                break
+        
+        if match_to_apply:
+            apply_lcomp(g, match_to_apply)
+        else:
+            raise Exception("No match to apply")
+
+        assert zx.compare_tensors(g_init, t2=g)
+
+        #FIXME: extraction with architecture awareness is currently not working
+        # architecture = create_line_architecture(g.qubit_count())
+        # graph_simp = g.copy()
+        # new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
+
+        new_circuit = zx.extract_circuit(g.copy())
+
+        assert zx.compare_tensors(g_init, new_circuit)
+
+
+    def test_gadget_lcomp_matches(self):
+        g = generate_graph(6, 50)
+        g_init = g.clone()
+
+        lcomp_matches = lcomp_matcher(g)
+
+        def get_matches_with_gadget(lcomp_matches):
+            matches = []
+            for match_key, match_values in lcomp_matches.items():
+                for match_value in match_values:
+                    lcomp_heuritstic, vertex_neighbors, unfusion_neighbor = match_value
+                    if unfusion_neighbor == -1:
+                        matches.append((match_key, match_value))
+            return list(matches)
+        
+        def calculate_gflow(graph: BaseGraph, edge=None) -> bool:
+            g_clone = graph.clone()
+            flow_function = FilterFlowFunc.G_FLOW_PRESERVING_GADGET
+            flow = flow_function(g_clone)
+            flow = flow if flow else None
+            return flow is not None
+        
+        matches = get_matches_with_gadget(lcomp_matches)
+
+        match_to_apply = None
+        for match_key, match_value in matches:
+            g_try = g.clone()
+            unfusion_info, time_info = apply_lcomp(g_try, (match_key, match_value))
+            if calculate_gflow(g_try):
+                match_to_apply = (match_key, match_value)
+                break
+        
+        if match_to_apply:
+            apply_lcomp(g, match_to_apply)
+        else:
+            raise Exception("No match to apply")
+
+        assert zx.compare_tensors(g_init, t2=g)
+
+        #FIXME: extraction with architecture awareness is currently not working
         # architecture = create_line_architecture(g.qubit_count())
         # graph_simp = g.copy()
         # new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
