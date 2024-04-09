@@ -50,7 +50,8 @@ def is_vertex_next_to_boundary(graph, vertex):
             return True
     return False
 
-def check_lcomp_match(graph, vertex, check_for_unfusions=True, check_for_xz_phase_gadgets=True, calculate_heuristic=True) -> Tuple[Tuple[VT], List[MatchLcompHeuristicType]] | None:
+#TODO: make check_for_xz_phase_gadgets a parameter in WireReducer
+def check_lcomp_match(graph, vertex, check_for_unfusions=True, check_for_xz_phase_gadgets=False, calculate_heuristic=True) -> Tuple[Tuple[VT], List[MatchLcompHeuristicType]] | None:
     vertex_types = graph.types()
 
     current_vertex_type = vertex_types[vertex]
@@ -1340,9 +1341,6 @@ class WireReducer:
             if not current_results:
                 return best_result
             
-            # if 90 not in lookahead_graph.vertex_set():
-            #     pass
-            
             current_key, current_result = current_results
             lookahead_current_match_list = current_match_list.copy()
             lookahead_current_match_list.append((current_key, current_result))
@@ -1377,15 +1375,10 @@ class WireReducer:
         for match in iterator:
             lookahead_graph = graph.clone()
             
-            if (47,) == match[0] and (-2.0, [45, 48], -1) == match[1]:
-                pass
             match_result = self._apply_match(lookahead_graph, match, skip_flow_calculation=False)
 
             if match_result is not None:
                 vertex_neighbors, removed_vertices = match_result
-
-                if 90 not in lookahead_graph.vertex_set() and 90 in vertex_neighbors:
-                    pass
                 
                 # For testing purposes
                 # if not self._is_graph_flow_preserving(lookahead_graph):
