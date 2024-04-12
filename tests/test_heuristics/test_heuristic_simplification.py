@@ -123,7 +123,7 @@ class TestHeuristics():
             zx.simplify.teleport_reduce(simplified_graph, quiet=True)
 
             # Apply the greedy simplification
-            zx.simplify.greedy_simp(simplified_graph, lookahead=la, use_phase_gadgets=True, quiet=True)
+            zx.simplify.greedy_simp(simplified_graph, lookahead=la, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, quiet=True)
 
             new_circuit = zx.extract_circuit(simplified_graph)
 
@@ -140,7 +140,7 @@ class TestHeuristics():
                 zx.simplify.teleport_reduce(simplified_graph, quiet=True)
 
                 # Apply the greedy simplification
-                zx.simplify.greedy_simp_neighbors(simplified_graph, lookahead=la, use_phase_gadgets=True, quiet=True)
+                zx.simplify.greedy_simp_neighbors(simplified_graph, lookahead=la, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, quiet=True)
 
                 new_circuit = zx.extract_circuit(simplified_graph)
 
@@ -159,8 +159,8 @@ class TestHeuristics():
             # Apply the greedy simplification
             g_simp = simplified_graph.copy()
             g_simp_nu = simplified_graph.copy()
-            zx.simplify.greedy_simp(g_simp, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, use_phase_gadgets=True, quiet=True)
-            zx.simplify.greedy_simp_neighbors(g_simp_nu, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, use_phase_gadgets=True, quiet=True)
+            zx.simplify.greedy_simp(g_simp, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, quiet=True)
+            zx.simplify.greedy_simp_neighbors(g_simp_nu, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, quiet=True)
 
             new_circuit_simp = zx.extract_circuit(g_simp)
             new_circuit_simp_nu = zx.extract_circuit(g_simp_nu)

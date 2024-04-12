@@ -339,12 +339,12 @@ algorithms = {
     "OR": None,
     "TR": zx.simplify.teleport_reduce,
     "FR": zx.simplify.full_reduce,
-    **{f"G{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_phase_gadgets=False) for la in lookahead},
-    **{f"GN{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_phase_gadgets=False) for la in lookahead},
-    **{f"GN_PG{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_phase_gadgets=True) for la in lookahead},
-    **{f"G_CFlow{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_phase_gadgets=False, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
-    **{f"GN_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_phase_gadgets=False, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
-    **{f"GN_PG_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_phase_gadgets=True, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead}
+    **{f"G{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False) for la in lookahead},
+    **{f"GN{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False) for la in lookahead},
+    **{f"GN_PG{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True) for la in lookahead},
+    **{f"G_CFlow{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
+    **{f"GN_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
+    **{f"GN_PG_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead}
 }
 
 #FIXME: There seems to be an error. Some neighbor unfusion algorithms are way faster than other without apperent reason. eg. GN1 and GN_PG1 for gf2^5_mult: ~70s vs ~1500s

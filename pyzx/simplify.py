@@ -219,7 +219,7 @@ def teleport_reduce(g: BaseGraph[VT,ET], quiet:bool=True, stats:Optional[Stats]=
     return s.mastergraph
 
 # TODO: update function calls in other files to use new parameters for greedy_simp and greedy_simp_neighbors
-def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, use_phase_gadgets=False, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`greedy_wire_reduce` to achieve a greedy simplification of the graph.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -238,7 +238,7 @@ def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahe
             id_simp_count = id_simp(g, quiet=quiet, stats=stats)
             spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
         
-        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=False, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, use_phase_gadgets=use_phase_gadgets, quiet=quiet, stats=stats)
+        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=False, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, use_yz_phase_gadgets=use_yz_phase_gadgets, use_xz_phase_gadgets=use_xz_phase_gadgets, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
             final_matches = applied_matches
             #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
@@ -251,7 +251,7 @@ def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahe
         iteration_count += 1
     return iteration_count, final_matches
 
-def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, use_phase_gadgets=False, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
+def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`greedy_wire_reduce` to achieve a greedy simplification of the graph including neighbor unfusion.
     The heuristic is based on the number of edges that are removed in the simplification.
@@ -269,7 +269,7 @@ def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=
             id_simp_count = id_simp(g, quiet=quiet, stats=stats)
             spider_simp_count = spider_simp(g, quiet=quiet, stats=stats) 
         
-        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=True, use_phase_gadgets=use_phase_gadgets, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
+        greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=True, use_yz_phase_gadgets=use_yz_phase_gadgets, use_xz_phase_gadgets=use_xz_phase_gadgets, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
             final_matches = applied_matches
             #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
@@ -282,6 +282,7 @@ def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=
         iteration_count += 1
     return iteration_count, final_matches
 
+# TODO: update function signiture in this file and calls in other files to use new parameters for random_simp, random_simp_neighbors, sim_anneal_simp, and sim_anneal_simp_neighbors
 def random_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahead=0, flow_function: FilterFlowFunc = FilterFlowFunc.NONE, quiet:bool=True, stats:Optional[Stats]=None) -> int:
     """
     This simplification procedure runs :func`random_wire_reduce` to achieve a random simplification of the graph.
