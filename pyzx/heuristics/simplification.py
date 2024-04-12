@@ -50,7 +50,6 @@ def is_vertex_next_to_boundary(graph, vertex):
             return True
     return False
 
-#TODO: make check_for_xz_phase_gadgets a parameter in WireReducer
 def check_lcomp_match(graph, vertex, check_for_unfusions=True, check_for_xz_phase_gadgets=False, calculate_heuristic=True) -> Tuple[Tuple[VT], List[MatchLcompHeuristicType]] | None:
     vertex_types = graph.types()
 
