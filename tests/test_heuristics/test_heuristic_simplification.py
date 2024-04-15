@@ -219,8 +219,8 @@ class TestHeuristics():
         g_pivot_gadget = g.clone()
         zx_pivot_gadget_matches = match_pivot_gadget(g_pivot_gadget)
 
-        # g_pivot_boundary = g.clone()
-        # zx_pivot_boundary_matches = match_pivot_boundary(g_pivot_boundary)
+        g_pivot_boundary = g.clone()
+        zx_pivot_boundary_matches = match_pivot_boundary(g_pivot_boundary)
 
         assert set([key[0] for key, values in lcomp_matches.items()]) == set([key for key, _ in zx_lcomp_matches])
         assert set([(key[0], key[1]) for key in pivot_matches.keys()]) == set([g.edge(key0, key1) for key0, key1, _, _ in zx_pivot_matches + zx_pivot_gadget_matches])
@@ -293,27 +293,31 @@ class TestHeuristics():
 
         assert zx.compare_tensors(g_init, t2=g)
 
-        #FIXME: extraction with architecture awareness is currently not working
-        # architecture = create_line_architecture(g.qubit_count())
-        # graph_simp = g.copy()
-        # new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
+        architecture = create_line_architecture(g.qubit_count())
+        graph_simp = g.copy()
+        new_circuit_arch = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
 
         new_circuit = zx.extract_circuit(g.copy())
 
         assert zx.compare_tensors(g_init, new_circuit)
+        assert zx.compare_tensors(g_init, new_circuit_arch)
 
     def test_boundary_lcomp_matches(self):
-        g = generate_graph(6, 50)
+        g = generate_graph(7, 50)
+        neighbor_next_to_boundary = list(g.neighbors(g.inputs()[0]))[0]
+        g.set_phase(neighbor_next_to_boundary, Fraction(1, 1))
         g_init = g.clone()
 
-        lcomp_matches = lcomp_matcher(g)
+        lcomp_matches = lcomp_matcher(g, check_for_xz_phase_gadgets=True)
 
         def get_matches_with_boundaries(lcomp_matches):
             matches = []
             for match_key, match_values in lcomp_matches.items():
                 for match_value in match_values:
+                    if match_key[0] == 7:
+                        pass
                     lcomp_heuritstic, vertex_neighbors, unfusion_neighbor = match_value
-                    if any([g.type(vertex) == zx.VertexType.BOUNDARY for vertex in vertex_neighbors]):
+                    if any([g.type(vertex) == zx.VertexType.BOUNDARY for vertex in vertex_neighbors]) and unfusion_neighbor == -1:
                         matches.append((match_key, match_value))
             return list(matches)
         
@@ -329,7 +333,7 @@ class TestHeuristics():
         match_to_apply = None
         for match_key, match_value in matches:
             g_try = g.clone()
-            unfusion_info, time_info = apply_lcomp(g_try, (match_key, match_value))
+            _ = apply_lcomp(g_try, (match_key, match_value))
             if calculate_gflow(g_try):
                 match_to_apply = (match_key, match_value)
                 break
@@ -341,21 +345,21 @@ class TestHeuristics():
 
         assert zx.compare_tensors(g_init, t2=g)
 
-        #FIXME: extraction with architecture awareness is currently not working
-        # architecture = create_line_architecture(g.qubit_count())
-        # graph_simp = g.copy()
-        # new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
+        architecture = create_line_architecture(g.qubit_count())
+        graph_simp = g.copy()
+        new_circuit_arch = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
 
         new_circuit = zx.extract_circuit(g.copy())
 
         assert zx.compare_tensors(g_init, new_circuit)
+        assert zx.compare_tensors(g_init, new_circuit_arch)
 
 
     def test_gadget_lcomp_matches(self):
         g = generate_graph(6, 50)
         g_init = g.clone()
 
-        lcomp_matches = lcomp_matcher(g)
+        lcomp_matches = lcomp_matcher(g, check_for_xz_phase_gadgets=True)
 
         def get_matches_with_gadget(lcomp_matches):
             matches = []
@@ -390,14 +394,14 @@ class TestHeuristics():
 
         assert zx.compare_tensors(g_init, t2=g)
 
-        #FIXME: extraction with architecture awareness is currently not working
-        # architecture = create_line_architecture(g.qubit_count())
-        # graph_simp = g.copy()
-        # new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
+        architecture = create_line_architecture(g.qubit_count())
+        graph_simp = g.copy()
+        new_circuit_arch = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
 
         new_circuit = zx.extract_circuit(g.copy())
 
         assert zx.compare_tensors(g_init, new_circuit)
+        assert zx.compare_tensors(g_init, new_circuit_arch)
         
 # if __name__ == '__main__':
 #     # pytest.main()

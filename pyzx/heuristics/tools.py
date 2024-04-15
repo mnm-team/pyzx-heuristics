@@ -1,4 +1,5 @@
 from fractions import Fraction
+from pyzx.graph.base import BaseGraph
 from pyzx.utils import VertexType, EdgeType
 
 
@@ -30,6 +31,17 @@ def insert_identity(g, v1, v2) -> int:
     else:
         g.add_edge((vmid,v2), EdgeType.HADAMARD)
     return vmid
+
+def disentangle_outputs(g: BaseGraph):
+    """helper function to put outputs of graph-like diagram in a form where they have an empty phase and are not interconnected
+    This may be needed to have flow"""
+    output_neighbors = dict()
+    for o in g.outputs():
+        n = list(g.neighbors(o))[0]
+        output_neighbors[o] = n
+    for o, n in output_neighbors.items():
+        if g.phase(n) != 0 or set(g.neighbors(n)).intersection(set(output_neighbors.values())):
+            insert_identity(g, n, o) 
 
 
 def insert_phase_gadget(g,vertex,desired_phase):

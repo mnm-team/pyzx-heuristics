@@ -775,13 +775,26 @@ def lcomp_with_boundaries(g: BaseGraph[VT,ET], matches: List[MatchLcompType[VT]]
         if a.numerator == 1: g.scalar.add_phase(Fraction(1,4))
         else: g.scalar.add_phase(Fraction(7,4))
 
-        rem.append(m[0])
+        
+        if len(boundary) == 0:
+            rem.append(m[0])
+        elif len(boundary) == 1:
+            # phaseless_vertex = insert_identity(g, m[0], boundary[0])
+            # neighbors_without_boundary.append(phaseless_vertex)
 
-        if len(boundary) > 1:
-            raise ValueError("Too many boundaries in local complementation")
-        elif len(boundary) != 0:
-            phaseless_vertex = insert_identity(g, m[0], boundary[0])
-            neighbors_without_boundary.append(phaseless_vertex)
+            orig_type = g.edge_type(g.edge(m[0], boundary[0]))
+            neighbors_without_boundary.append(m[0])
+
+            for neighbor in m[1]:
+                g.remove_edge(g.edge(m[0], neighbor))
+            g.set_phase(m[0], 0)
+            
+            if orig_type == EdgeType.HADAMARD:
+                g.add_edge((m[0], boundary[0]), EdgeType.SIMPLE)
+            else:
+                g.add_edge((m[0], boundary[0]), EdgeType.HADAMARD)
+        else:
+            raise ValueError("More than one boundary in lcomp match")
 
         n = len(neighbors_without_boundary)
         g.scalar.add_power((n-2)*(n-1)//2)

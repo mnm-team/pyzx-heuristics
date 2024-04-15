@@ -58,7 +58,8 @@ def lcomp_heuristic(graph: BaseGraph[VT,ET], target_vertex, debug=False):
     if phase_type == PhaseType.TRUE_CLIFFORD:
         return heuristic_result + len(target_vertex_neighbors)
     elif phase_type == PhaseType.CLIFFORD:
-        return heuristic_result
+        #FIXME: -1 is a hack. Check why this is needed (pi copy rule in paper?)
+        return heuristic_result - 1
     elif phase_type == PhaseType.NON_CLIFFORD:
         return heuristic_result - 1
     else:
