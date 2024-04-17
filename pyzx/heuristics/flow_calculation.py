@@ -382,6 +382,7 @@ class MeasurementType:
   Z: Final = 5
   EFFECT: Final = 6 #spider does not have a measurement plane but is part of an XZ or YZ measurement, i.e. the upper part of phase gadget
 
+#TODO: Would make more sense if this was a proeperty of the graph
 def get_measurement_types(graph: BaseGraph[VT,ET]):
   """Get the measurement types of the vertices in the graph."""
   measurements: Dict[int, MeasurementType.Type] = dict()
@@ -410,21 +411,21 @@ def moutputs(graph: BaseGraph[VT,ET]):
   return set([list(graph.neighbors(output))[0] for output in graph.outputs()])
 
 def neighbors_without_effect_or_boundary(graph, vertex, mtypes):
-  return [n for n in graph.neighbors(vertex) if mtypes[n] != MeasurementType.EFFECT and graph.type(n) != VertexType.BOUNDARY]
+  return [n for n in graph.neighbors(vertex) if mtypes[n] != MeasurementType.EFFECT]# and graph.type(n) != VertexType.BOUNDARY]
 
 #FIXME: This does not seem to work correctly. It is way to fast in comparison to the other implementation
 def identify_gflow_with_gadgets(g: BaseGraph[VT,ET]) -> Optional[Flow]:
   """Compute maximally delayed gflow of a graph-like diagram as in https://arxiv.org/pdf/2003.01664.pdf"""
   res: Flow = (dict(), dict())
   
-  processed = set(moutputs(g))
-  inputs = set(minputs(g))
-  # processed = set(g.outputs())
-  # inputs = set(g.inputs())
+  # processed = set(moutputs(g))
+  # inputs = set(minputs(g))
+  processed = set(g.outputs())
+  inputs = set(g.inputs())
 
   mtypes = get_measurement_types(g)
-  vertices: Set[VT] = set(mvertices(g, mtypes))
-  # vertices: Set[VT] = g.vertex_set()
+  # vertices: Set[VT] = set(mvertices(g, mtypes))
+  vertices: Set[VT] = g.vertex_set()
   depth: int = 1
   
   for v in processed:
@@ -434,9 +435,6 @@ def identify_gflow_with_gadgets(g: BaseGraph[VT,ET]) -> Optional[Flow]:
       correct = set()
       processed_prime = [v for v in processed.difference(inputs) if any(w not in processed for w in neighbors_without_effect_or_boundary(g,v,mtypes))]
       candidates = [v for v in vertices.difference(processed) if any(w in processed_prime for w in neighbors_without_effect_or_boundary(g,v,mtypes))]
-
-      # processed_prime = [v for v in processed.difference(inputs) if any(w not in processed for w in g.neighbors(v))]
-      # candidates = [v for v in vertices.difference(processed) if any(w in processed_prime for w in g.neighbors(v))]
 
       zerovec = Mat2([[0] for _ in range(len(candidates))])
       m = bi_adj(g, processed_prime, candidates)

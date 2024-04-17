@@ -311,8 +311,8 @@ def run_algorithm(algorithm, input_data, algorithm_name, pre_tr:bool = True):
 
 dataframes = []
 
-# circuits = ["barenco_tof_3", "gf2^6_mult", "tof_10", "mod_red_21", "gf2^5_mult"]
-circuits = ["barenco_tof_3"]
+circuits = ["barenco_tof_3", "gf2^6_mult", "tof_10", "mod_red_21", "gf2^5_mult"]
+# circuits = ["barenco_tof_3"]
 
 # Load the circuits and get original data
 input_data, output_data_or = load_circuits(path_to_circuits, circuits)
