@@ -25,9 +25,6 @@ def get_phase_type(phase):
     else:
         return PhaseType.NON_CLIFFORD
 
-
-#TODO: Add test to check if heuritsics acutally reduce the number of edges in the graph by the right amount
-
 def lcomp_heuristic(graph: BaseGraph[VT,ET], target_vertex, debug=False):
     """
     Calculates local complementation heuristic (LCH)
@@ -104,7 +101,7 @@ def lcomp_heuristic_neighbor_unfusion(graph: BaseGraph[VT,ET], target_vertex, un
     heuristic_result = connected_neighbors_count - max_connections
     if debug:
         print("connected_neighbors ",connected_neighbors_count,"max_connections ",heuristic_result)
-    return heuristic_result + len(target_vertex_neighbors) - 2
+    return heuristic_result + len(target_vertex_neighbors) - 1
 
 
 
@@ -149,9 +146,9 @@ def pivot_heuristic(graph: BaseGraph[VT,ET], edge, debug=False):
     if phase_type1 == PhaseType.CLIFFORD and phase_type2 == PhaseType.CLIFFORD:
         return heuristic_result + len(graph.neighbors(vertex1)) + len(graph.neighbors(vertex2)) - 1
     elif phase_type1 != PhaseType.CLIFFORD and phase_type2 == PhaseType.CLIFFORD:
-        return heuristic_result + len(graph.neighbors(vertex2)) - 1
-    elif phase_type1 == PhaseType.CLIFFORD and phase_type2 != PhaseType.CLIFFORD:
         return heuristic_result + len(graph.neighbors(vertex1)) - 1
+    elif phase_type1 == PhaseType.CLIFFORD and phase_type2 != PhaseType.CLIFFORD:
+        return heuristic_result + len(graph.neighbors(vertex2)) - 1
     elif phase_type1 != PhaseType.CLIFFORD and phase_type2 != PhaseType.CLIFFORD:
         return heuristic_result - 2
     else:

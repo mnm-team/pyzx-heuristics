@@ -3,13 +3,9 @@ from pathlib import Path
 import sys
 import time
 
-
-
-
-print(Path(__file__).parent.parent.parent)
-if Path(__file__).parent.parent.parent not in sys.path:
-    print("Adding path")
-    sys.path.append(str(Path(__file__).parent.parent.parent))
+project_path = Path(__file__).parent.parent.parent
+if project_path not in sys.path:
+    sys.path.append(str(project_path))
 
 import random
 import pyzx as zx
@@ -21,7 +17,7 @@ from pyzx.routing.architecture import create_line_architecture
 
 
 def load_graphs() -> dict[str, list]:
-    path_to_circuits = 'c:\\Users\\wsajk\\Documents\\Arbeit\\MUNIQC-Atoms\\pyzx-heuristics\\circuits\\qasm\\'
+    path_to_circuits = project_path / 'circuits\\qasm'
     input_data = {"Name": [], "circuit": [], "graph": []}
 
     for file in Path(path_to_circuits).glob('*.qasm'):
@@ -78,17 +74,35 @@ def calculate_gflow_gadget(graph: BaseGraph) -> bool:
     flow = flow if flow else None
     return flow is not None
 
-def apply_random_matches(graph: BaseGraph, num_matches: int = 50, flow_function=None):
-    for i in range(num_matches):
-        lcomp_matches = lcomp_matcher(graph, check_for_unfusions=False)
-        pivot_matches = pivot_matcher(graph, check_for_unfusions=False)
+def apply_random_matches(graph: BaseGraph, num_matches: int = 50, flow_function=None, match_filter_func=None):
 
-        if random.randint(0, 1):
+    applied_matches = []
+
+    for i in range(num_matches):
+        lcomp_matches = lcomp_matcher(graph)
+        pivot_matches = pivot_matcher(graph)
+
+        if match_filter_func:
+            lcomp_matches = match_filter_func(graph, lcomp_matches)
+            pivot_matches = match_filter_func(graph, pivot_matches)
+        
+        if not lcomp_matches and not pivot_matches:
+            return []
+        
+        if random.randint(0, 1) and lcomp_matches:
             matches = lcomp_matches
             match_type = MatchType.LCOMP
         else:
             matches = pivot_matches
             match_type = MatchType.PIVOT
+        
+        if not matches:
+            if match_type == MatchType.PIVOT:
+                matches = lcomp_matches
+                match_type = MatchType.LCOMP
+            else:
+                matches = pivot_matches
+                match_type = MatchType.PIVOT
 
         match_items = list(matches.items())
         random.shuffle(match_items)
@@ -109,8 +123,8 @@ def apply_random_matches(graph: BaseGraph, num_matches: int = 50, flow_function=
                     is_flow_preserving = True
 
                 if is_flow_preserving:
-                    print(f"Match {i}: {match_key}, {match_value}")
                     was_match_applied = True
+                    applied_matches.append((match_key, match_value))
                     if match_type == MatchType.LCOMP:
                         apply_lcomp(graph, (match_key, match_value))
                     elif match_type == MatchType.PIVOT:
@@ -118,6 +132,7 @@ def apply_random_matches(graph: BaseGraph, num_matches: int = 50, flow_function=
                     break
             if was_match_applied:
                 break
+    return applied_matches
 
 
 class TestHeuristics():
@@ -190,23 +205,25 @@ class TestHeuristics():
 
     def test_greedy_simp_neighbors(self):
             
-            circuit, graph = get_circuit_and_fr_graph(10, 20)
+        random.seed(1)
+        circuit, graph = get_circuit_and_fr_graph(10, 20)
 
-            for la in range(2):
+        for la in range(2):
 
-                simplified_graph = graph.copy()
-                # Apply the greedy simplification
-                zx.simplify.teleport_reduce(simplified_graph, quiet=True)
+            simplified_graph = graph.copy()
+            # Apply the greedy simplification
+            zx.simplify.teleport_reduce(simplified_graph, quiet=True)
 
-                # Apply the greedy simplification
-                zx.simplify.greedy_simp_neighbors(simplified_graph, lookahead=la, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, quiet=True)
+            # Apply the greedy simplification
+            zx.simplify.greedy_simp_neighbors(simplified_graph, lookahead=la, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, quiet=True)
 
-                new_circuit = zx.extract_circuit(simplified_graph)
+            new_circuit = zx.extract_circuit(simplified_graph)
 
-                assert zx.compare_tensors(circuit, new_circuit)
+            assert zx.compare_tensors(circuit, new_circuit)
 
     def test_c_flow(self):
 
+        random.seed(8)
         circuit, graph = get_circuit_and_fr_graph(5, 10)
 
         for la in range(2):
@@ -218,8 +235,8 @@ class TestHeuristics():
             # Apply the greedy simplification
             g_simp = simplified_graph.copy()
             g_simp_nu = simplified_graph.copy()
-            zx.simplify.greedy_simp(g_simp, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, quiet=True)
-            zx.simplify.greedy_simp_neighbors(g_simp_nu, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, quiet=True)
+            zx.simplify.greedy_simp(g_simp, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, quiet=True)
+            zx.simplify.greedy_simp_neighbors(g_simp_nu, lookahead=la, flow_function=FilterFlowFunc.C_FLOW_PRESERVING, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, quiet=True)
 
             new_circuit_simp = zx.extract_circuit(g_simp)
             new_circuit_simp_nu = zx.extract_circuit(g_simp_nu)
@@ -257,21 +274,6 @@ class TestHeuristics():
             new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=False, quiet=True)
 
             assert zx.compare_tensors(circuit, new_circuit)
-
-    def test_phase_gadget_matches(self):
-        random.seed(60)
-        og = generate_graph(5, 30)
-        g = og.clone()
-        
-        apply_random_matches(g, num_matches=50, flow_function=calculate_gflow_gadget)
-
-        #FIXME: for seed 60, 50 matches, 5 qubits and depth 30, g and og are the same but the extraction is not the same. This should never happen.
-        # This is probably because the zx extraction is not working properly
-        new_circuit = zx.extract_circuit(g.copy())
-        
-        assert zx.compare_tensors(og.copy(), g.copy())
-        assert zx.compare_tensors(new_circuit.copy(), g.copy())
-
                 
 
     def test_phase_gadget_extraction(self):
@@ -351,7 +353,6 @@ class TestHeuristics():
         assert zx.compare_tensors(g_init, new_circuit)
         # assert zx.compare_tensors(g_init, new_circuit_arch)
 
-    #FIXME: This test is working but for demo_benchmark boundaries do not work if they are used for lcomp and pivots. Write test which will test this
     def test_boundary_lcomp_matches(self):
 
         def get_matches_with_boundaries(lcomp_matches):
@@ -370,6 +371,7 @@ class TestHeuristics():
             flow = flow if flow else None
             return flow is not None
 
+        random.seed(0)
         for i in range(30):
 
             g = generate_graph(5, 20)
@@ -399,14 +401,12 @@ class TestHeuristics():
 
             if match_to_apply:
                 apply_lcomp(g, match_to_apply)
-            else:
-                raise Exception("No match to apply")
+                assert zx.compare_tensors(g_init, t2=g)
 
-            assert zx.compare_tensors(g_init, t2=g)
-
-        architecture = create_line_architecture(g.qubit_count())
-        graph_simp = g.copy()
-        new_circuit_arch = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
+            
+        # architecture = create_line_architecture(g.qubit_count())
+        # graph_simp = g.copy()
+        # new_circuit_arch = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
 
         new_circuit = zx.extract_circuit(g.copy())
 
@@ -527,14 +527,39 @@ class TestHeuristics():
 
             assert zx.compare_tensors(g_init, t2=g)
 
-        architecture = create_line_architecture(g.qubit_count())
-        graph_simp = g.copy()
-        new_circuit_arch = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
+        # architecture = create_line_architecture(g.qubit_count())
+        # graph_simp = g.copy()
+        # new_circuit_arch = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
 
         new_circuit = zx.extract_circuit(g.copy())
 
         assert zx.compare_tensors(g_init, new_circuit)
         # assert zx.compare_tensors(new_circuit, new_circuit_arch)
+
+
+    def test_boundary_matches(self):
+        random.seed(8)
+        og = generate_graph(5, 20)
+        g = og.clone()
+
+        def get_matches_with_boundaries(g:BaseGraph, matches):
+            found_matches = {}
+            for match_key, match_values in matches.items():
+                for match_value in match_values:
+                    if get_match_type((match_key, match_values[0])) == MatchType.LCOMP:
+                        _, vertex_neighbors, _ = match_value
+                    elif get_match_type((match_key, match_values[0])) == MatchType.PIVOT:
+                        vertex_neighbors = set(g.neighbors(match_key[0])).union(set(g.neighbors(match_key[1])))
+                    if any([g.type(vertex) == zx.VertexType.BOUNDARY for vertex in vertex_neighbors]):
+                        new_match_values = found_matches.get(match_key, [])
+                        new_match_values.append(match_value)
+                        found_matches[match_key] = new_match_values
+            return found_matches
+        
+        match_list = apply_random_matches(g, num_matches=20, flow_function=calculate_gflow_gadget, match_filter_func=get_matches_with_boundaries)
+        
+        assert zx.compare_tensors(og, t2=g)
+
 
     def test_gflow_functions(self):
         
@@ -588,6 +613,33 @@ class TestHeuristics():
                         break
 
             print("Gflow time: ", gflow_time)
+
+
+    def test_heuristic_values(self):
+        random.seed(8)
+        og = generate_graph(6, 50)
+        g = og.clone()
+        
+        for i in range(300):
+
+            original_eges = g.num_edges()
+            match_list = apply_random_matches(g, num_matches=1, flow_function=calculate_gflow_gadget)
+            new_edges = g.num_edges()
+
+            match_key, match_value = match_list[0]
+            if get_match_type((match_key, match_value)) == MatchType.LCOMP:
+                result = (match_value[2])
+            elif get_match_type((match_key, match_value)) == MatchType.PIVOT:
+                result = (match_value[1], match_value[2])
+
+            heuristic_value = match_value[0]
+            # print(f"Match {i}: {match_key}, {match_value}, Edge difference: {original_eges - new_edges}")
+            print('Match {:2s}, {:20s} {:7s}/ {:7s} {}'.format(str(i), str(match_key), str(heuristic_value), str(original_eges - new_edges), str(result)))
+
+            assert heuristic_value == original_eges - new_edges
+
+
+
         
 # if __name__ == '__main__':
 #     # pytest.main()

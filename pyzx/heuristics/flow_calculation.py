@@ -413,7 +413,6 @@ def moutputs(graph: BaseGraph[VT,ET]):
 def neighbors_without_effect_or_boundary(graph, vertex, mtypes):
   return [n for n in graph.neighbors(vertex) if mtypes[n] != MeasurementType.EFFECT]# and graph.type(n) != VertexType.BOUNDARY]
 
-#FIXME: This does not seem to work correctly. It is way to fast in comparison to the other implementation
 def identify_gflow_with_gadgets(g: BaseGraph[VT,ET]) -> Optional[Flow]:
   """Compute maximally delayed gflow of a graph-like diagram as in https://arxiv.org/pdf/2003.01664.pdf"""
   res: Flow = (dict(), dict())

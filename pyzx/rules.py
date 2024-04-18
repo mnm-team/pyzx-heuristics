@@ -757,7 +757,6 @@ def insert_identity(g, v1, v2) -> int:
         g.add_edge((vmid,v2), EdgeType.HADAMARD)
     return vmid
 
-#FIXME: Here no new vertex should be added. Instead the current vertex should be used as the new vertex (so no vertex is removed) in case of a boundary match.
 def lcomp_with_boundaries(g: BaseGraph[VT,ET], matches: List[MatchLcompType[VT]]) -> RewriteOutputType[ET,VT]:
     """Performs a local complementation based rewrite rule on the given graph with the
     given ``matches`` returned from ``match_lcomp(_parallel)``. See "Graph Theoretic
@@ -779,9 +778,6 @@ def lcomp_with_boundaries(g: BaseGraph[VT,ET], matches: List[MatchLcompType[VT]]
         if len(boundary) == 0:
             rem.append(m[0])
         elif len(boundary) == 1:
-            # phaseless_vertex = insert_identity(g, m[0], boundary[0])
-            # neighbors_without_boundary.append(phaseless_vertex)
-
             orig_type = g.edge_type(g.edge(m[0], boundary[0]))
             neighbors_without_boundary.append(m[0])
 
