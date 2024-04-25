@@ -570,7 +570,7 @@ class TestHeuristics():
 
             for _ in range(50):
                 lcomp_matches = lcomp_matcher(g, check_for_xz_phase_gadgets=False)
-                pivot_matches = pivot_matcher(g, check_for_unfusions=True, check_for_phase_gadgets=False)
+                pivot_matches = pivot_matcher(g, check_for_phase_gadgets=False)
 
                 if random.randint(0, 1):
                     matches = lcomp_matches

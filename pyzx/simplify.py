@@ -240,11 +240,10 @@ def greedy_simp(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=1, lookahe
         
         greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=False, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, use_yz_phase_gadgets=use_yz_phase_gadgets, use_xz_phase_gadgets=use_xz_phase_gadgets, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
-            final_matches = applied_matches
-            #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
+            final_matches += applied_matches
 
-        # if not filter_flow_func(g):
-        #     raise Exception("Flow function failed")
+        if not flow_function(g):
+            raise Exception("Flow function failed")
         
         # if greedy_wire_reduce_count == 0: break
         if id_simp_count + spider_simp_count + greedy_wire_reduce_count == 0: break
@@ -271,8 +270,7 @@ def greedy_simp_neighbors(g: BaseGraph[VT,ET], max_vertex_index=None, threshold=
         
         greedy_wire_reduce_count, applied_matches = greedy_wire_reduce(g, use_neighbor_unfusion=True, use_yz_phase_gadgets=use_yz_phase_gadgets, use_xz_phase_gadgets=use_xz_phase_gadgets, flow_function=flow_function, max_vertex_index=max_vertex_index, threshold=threshold, lookahead=lookahead, quiet=quiet, stats=stats)
         if len(applied_matches) > 0: 
-            final_matches = applied_matches
-            #logging.info(f"greedy_wire_reduce_count: {greedy_wire_reduce_count}")
+            final_matches += applied_matches
 
         # if flow_function(g) is None:
         #     raise Exception("Flow function failed")

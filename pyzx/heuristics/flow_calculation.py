@@ -1,9 +1,11 @@
 from fractions import Fraction
 import itertools
+import logging
 from typing import Dict, Final, List, Literal, Optional, Set, Tuple
 from pyzx.graph.base import BaseGraph, VT, ET, EdgeType
 from pyzx.linalg import CNOTMaker, Mat2
 from pyzx.utils import VertexType, phase_is_true_clifford
+
 
 def calculate_lcomp(graph: BaseGraph[VT,ET], vertex: VT):
   """
@@ -222,8 +224,6 @@ def update_gflow_from_lcomp(graph: BaseGraph[VT,ET], lcomp_vertex: VT, gflow):
 
 
 
-
-
 Flow = Tuple[Dict[VT, Set[VT]], Dict[VT,int]]
 
 def identify_cflow(g: BaseGraph[VT, ET]) -> Optional[Flow]:
@@ -415,6 +415,7 @@ def neighbors_without_effect_or_boundary(graph, vertex, mtypes):
 
 def identify_gflow_with_gadgets(g: BaseGraph[VT,ET]) -> Optional[Flow]:
   """Compute maximally delayed gflow of a graph-like diagram as in https://arxiv.org/pdf/2003.01664.pdf"""
+
   res: Flow = (dict(), dict())
   
   # processed = set(moutputs(g))

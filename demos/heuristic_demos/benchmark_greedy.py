@@ -3,11 +3,10 @@ import random
 import sys
 
 from pathlib import Path
-from typing import List
+from typing import Dict, List, Tuple
 import uuid
 import warnings
-
-import numpy as np
+import concurrent.futures
 
 project_path = Path(__file__).parent.parent.parent
 if project_path not in sys.path:
@@ -30,30 +29,45 @@ from pyzx.circuit.gates import CZ, Gate, ZPhase
 from pyzx.optimize import Optimizer, toggle_element
 from pyzx.heuristics.simplification import FilterFlowFunc
 
-path_to_circuits = project_path / 'circuits\\qasm'
 
-unique_id = uuid.uuid4().hex
-path_to_current_run = project_path / 'demos\\heuristic_demos\\benchmarks' / unique_id
-path_to_current_run.mkdir(parents=False, exist_ok=False)
+def store_values_in_dict(stats: str, name, graph, iterations: int, num_matches: int, time: float) -> Dict[Tuple[str, str], int | float]:
+    
+    output_data = {}
 
-path_to_graphs = path_to_current_run / 'graphs'
-path_to_graphs.mkdir(parents=False, exist_ok=True)
+    if stats is None:
+        output_data[(name, "gates")] = 0
+        output_data[(name, "t_count")] = 0
+        output_data[(name, "cliffords")] = 0
+        output_data[(name, "cnot")] = 0
+        output_data[(name, "other")] = 0
+        output_data[(name, "hadamard")] = 0
+    else:
+        numbers = re.findall(r'\d+', stats)
+        output_data[(name, "gates")] = int(numbers[1])
+        output_data[(name, "t_count")] = int(numbers[2])
+        output_data[(name, "cliffords")] = int(numbers[3])
+        output_data[(name, "cnot")] = int(numbers[6])
+        output_data[(name, "other")] = int(numbers[7])
+        output_data[(name, "hadamard")] = int(numbers[8])
 
-logging.basicConfig(filename=path_to_current_run / 'log.log',
-                    filemode='a',
-                    format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
-                    datefmt='%H:%M:%S',
-                    level=logging.DEBUG)
+    if graph is None:
+        output_data[(name, "verticies")] = 0
+        output_data[(name, "edges")] = 0
+    else:
+        output_data[(name, "verticies")] = graph.num_vertices()
+        output_data[(name, "edges")] = graph.num_edges()
 
-logger = logging.getLogger('Greedy_Benchmark')
-seed = 1332
-random.seed(seed)
+    output_data[(name, "iterations")] = int(iterations)
+    output_data[(name, "num Matches")] = int(num_matches)
+    output_data[(name, "time")] = int(time)
+
+    return output_data
 
 
-def load_circuits(path_to_circuits:Path, circuit_names:str|List[str]|None):
+def load_circuits(path_to_circuits:Path, circuit_names:str|List[str]|None) -> tuple[dict[str, list], dict]:
 
     input_data = {"Name": [], "circuit": [], "graph": []}
-    output_data = {"gates": [], "t_count": [], "cliffords": [], "cnot": [], "other": [], "hadamard": [], "verticies": [], "edges": [], "time": []}
+    output_data = {}
 
     for file in path_to_circuits.glob('*.qasm'):
         circuit = zx.Circuit.load(file).to_basic_gates()
@@ -77,21 +91,10 @@ def load_circuits(path_to_circuits:Path, circuit_names:str|List[str]|None):
             input_data["Name"].append(file.stem)
             input_data["circuit"].append(circuit)
             input_data["graph"].append(circuit.to_graph())
-            logger.info(f"Loaded {file.stem}")
+            logging.info(f"Loaded {file.stem}")
             logging.info(circuit.stats())
 
-            numbers = re.findall(r'\d+', circuit.stats())
-
-            # Assign the numbers to variables
-            output_data["gates"].append(int(numbers[1]))
-            output_data["t_count"].append(int(numbers[2]))
-            output_data["cliffords"].append(int(numbers[3]))
-            output_data["cnot"].append(int(numbers[6]))
-            output_data["other"].append(int(numbers[7]))
-            output_data["hadamard"].append(int(numbers[8]))
-            output_data["verticies"].append(graph.num_vertices())
-            output_data["edges"].append(graph.num_edges())
-            output_data["time"].append(0)
+            output_data = output_data | store_values_in_dict(stats=circuit.stats(), name=file.stem, graph=graph, iterations=0, num_matches=0, time=0)
 
     return input_data, output_data
 
@@ -235,148 +238,179 @@ class Optimizer_no_new_cnots(Optimizer):
         else:
             raise TypeError("Unknown gate {}".format(str(g)))
 
-def run_algorithm(algorithm, input_data, algorithm_name, pre_tr:bool = True):
+def run_algorithm(algorithm, input_data, algorithm_name, seed, path_to_graphs, path_to_current_run, pre_tr:bool = True):
     
-    output_data = {"gates": [], "t_count": [], "cliffords": [], "cnot": [], "other": [], "hadamard": [], "verticies": [], "edges": [], "time": []}
+    logging.basicConfig(filename=path_to_current_run / 'log.log',
+                        filemode='a',
+                        format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                        datefmt='%H:%M:%S',
+                        level=logging.DEBUG)
+
+    logger = logging.getLogger('Greedy_Benchmark')
+
+    output_data = {}
 
     for name, graph in zip(input_data["Name"], input_data["graph"]):
+
+        random.seed(seed)
         graph_simplified = graph.clone()
         if pre_tr:
             graph_simplified = zx.simplify.teleport_reduce(graph_simplified)
             graph_simplified.track_phases = False
             
-        logging.info(f"Running {algorithm} on {name}")
+        logger.info(f"Running {algorithm} on {name}")
 
         algorithm_failed = False
 
+        result = None
         start = time.perf_counter()
         try:
-            algorithm(graph_simplified)
+            result = algorithm(graph_simplified)
             with open(f"{path_to_graphs}/{name}_{algorithm_name}.json", 'w') as f:
                 f.write(graph_simplified.to_json())
-        except Exception:
+        except Exception as e:
             algorithm_failed = True
             warnings.warn(f"Failed to run {algorithm_name} on {name}")
-            logging.warning(f"Failed to run {algorithm_name} on {name}")
+            logger.warning(f"Failed to run {algorithm_name} on {name} with error: {e}")
+            logger.exception(e)
 
         end = time.perf_counter() - start
 
-        logging.info(f"Finished execution in {end} seconds")
+        logger.info(f"Finished execution in {end} seconds")
+
+        iteration_count = 0
+        num_final_matches = 0
+        if result and isinstance(result, tuple):
+            iteration_count, final_matches = result
+            num_final_matches = len(final_matches)
 
         if not algorithm_failed:
             try:
-                qc = zx.extract_circuit(graph_simplified)
+                qc = zx.extract_circuit(graph_simplified.copy())
                 # qc = basic_optimization_min_cnots(qc.to_basic_gates())
                 qc = zx.optimize.basic_optimization(qc.to_basic_gates())
 
                 stats = qc.stats()
-                logging.info(f"Stats for {algorithm} on {name}:")
-                logging.info(stats+"\n")
+                logger.info(f"Stats for {algorithm} on {name}:")
+                logger.info(stats+"\n")
                 # Extract the numbers
-                numbers = re.findall(r'\d+', stats)
-
-                output_data["gates"].append(int(numbers[1]))
-                output_data["t_count"].append(int(numbers[2]))
-                output_data["cliffords"].append(int(numbers[3]))
-                output_data["cnot"].append(int(numbers[6]))
-                output_data["other"].append(int(numbers[7]))
-                output_data["hadamard"].append(int(numbers[8]))
-            except Exception:
+                
+                output_data = output_data | store_values_in_dict(stats=stats, name=name, graph=graph_simplified, iterations=iteration_count, num_matches=num_final_matches, time=end)
+            except Exception as e:
 
                 warnings.warn(f"Failed to extract circuit from {name} after {algorithm_name} simplification")
-                logging.warning(f"Failed to extract circuit from {name} after {algorithm_name} simplification")
-                output_data["gates"].append(np.nan)
-                output_data["t_count"].append(np.nan)
-                output_data["cliffords"].append(np.nan)
-                output_data["cnot"].append(np.nan)
-                output_data["other"].append(np.nan)
-                output_data["hadamard"].append(np.nan)
+                logger.warning(f"Failed to extract circuit from {name} after {algorithm_name} simplification with error: {e}")
+                logger.exception(e)
+                
+                output_data = output_data | store_values_in_dict(stats=None, name=name, graph=graph_simplified, iterations=iteration_count, num_matches=num_final_matches, time=end)
 
-            output_data["verticies"].append(graph_simplified.num_vertices())
-            output_data["edges"].append(graph_simplified.num_edges())
-            output_data["time"].append(int(end))
         else:
-            output_data["gates"].append(np.nan)
-            output_data["t_count"].append(np.nan)
-            output_data["cliffords"].append(np.nan)
-            output_data["cnot"].append(np.nan)
-            output_data["other"].append(np.nan)
-            output_data["hadamard"].append(np.nan)
-            output_data["verticies"].append(np.nan)
-            output_data["edges"].append(np.nan)
-            output_data["time"].append(int(end))
+            
+            output_data = output_data | store_values_in_dict(stats=None, name=name, graph=None, iterations=iteration_count, num_matches=num_final_matches, time=end)
 
     return output_data
 
 
-dataframes = []
+def run_benchmark():
 
-circuits = ["barenco_tof_3", "gf2^6_mult", "tof_10", "mod_red_21", "gf2^5_mult"]
-# circuits = ["barenco_tof_3"]
+    path_to_circuits = project_path / 'circuits\\qasm'
 
-# Load the circuits and get original data
-input_data, output_data_or = load_circuits(path_to_circuits, circuits)
+    unique_id = uuid.uuid4().hex
+    path_to_current_run = project_path / 'demos\\heuristic_demos\\benchmarks' / unique_id
+    path_to_current_run.mkdir(parents=False, exist_ok=False)
 
-# Define the column names
-columns = input_data["Name"]
+    path_to_graphs = path_to_current_run / 'graphs'
+    path_to_graphs.mkdir(parents=False, exist_ok=True)
 
-# Define the row labels
-rows = list(output_data_or.keys())
+    logging.basicConfig(filename=path_to_current_run / 'log.log',
+                        filemode='a',
+                        format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',
+                        datefmt='%H:%M:%S',
+                        level=logging.DEBUG)
 
-data = list(output_data_or.values())
+    logger = logging.getLogger('Greedy_Benchmark')
+    seed = 1332
+    random.seed(seed)
 
-# Add original data to the dataframe
-dataframes.append(pd.DataFrame(data, columns=columns, index=rows))
+    print(f"Starting benchmark: {unique_id} with seed {seed}")
 
+    output_data_for_algorithms = []
 
+    # circuits = ["barenco_tof_3", "gf2^6_mult", "tof_10", "mod_red_21", "gf2^5_mult"]
+    circuits = ["barenco_tof_3", "gf2^5_mult", "tof_10", "mod_red_21"]
 
+    # Load the circuits and get original data
+    input_data, output_data_or = load_circuits(path_to_circuits, circuits)
 
-lookahead = list(range(0, 2))
-threshold = 1
+    output_data_for_algorithms.append(output_data_or)
 
-# Define the algorithms
-algorithms = {
-    "OR": None,
-    "TR": zx.simplify.teleport_reduce,
-    "FR": zx.simplify.full_reduce,
-    **{f"G{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False) for la in lookahead},
-    **{f"GN{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False) for la in lookahead},
-    **{f"GN_PG{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True) for la in lookahead},
-    **{f"G_CFlow{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
-    **{f"GN_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
-    **{f"GN_PG_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead}
-}
+    lookahead = list(range(0, 2))
+    threshold = 1
 
-#FIXME: There seems to be an error. Some neighbor unfusion algorithms are way faster than other without apperent reason. eg. GN1 and GN_PG1 for gf2^5_mult: ~70s vs ~1500s
-for algorithm_name, algorithm in algorithms.items():
-    if algorithm is None:
-        continue
-    if algorithm_name == "TR" or algorithm_name == "FR":
-        pre_tr = False
-    else:
-        pre_tr = True
+    # Define the algorithms
+    algorithms = {
+        "OR": None,
+        "TR": zx.simplify.teleport_reduce,
+        "FR": zx.simplify.full_reduce,
+        **{f"G{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, flow_function=FilterFlowFunc.G_FLOW_PRESERVING) for la in lookahead},
+        **{f"G_PG{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, flow_function=FilterFlowFunc.G_FLOW_PRESERVING_GADGET) for la in lookahead},
+        **{f"GN{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, flow_function=FilterFlowFunc.G_FLOW_PRESERVING) for la in lookahead},
+        **{f"GN_PG{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, flow_function=FilterFlowFunc.G_FLOW_PRESERVING_GADGET) for la in lookahead},
+        **{f"G_CFlow{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
+        **{f"G_PG_CFlow{la}": partial(zx.simplify.greedy_simp, lookahead=la, threshold=threshold, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
+        **{f"GN_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=False, use_xz_phase_gadgets=False, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead},
+        **{f"GN_PG_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead}
+    }
 
-    # Run the algorithm and get the output data
-    output_data = run_algorithm(algorithm, input_data, algorithm_name, pre_tr=pre_tr)
-    # Add the output data to the dataframe
-    dataframes.append(pd.DataFrame(list(output_data.values()), columns=columns, index=rows))
+    for algorithm_name, algorithm in algorithms.items():
+        if algorithm is None:
+            continue
+        if algorithm_name == "TR" or algorithm_name == "FR":
+            pre_tr = False
+        else:
+            pre_tr = True
 
-# Concatenate the dataframes and save them to a csv file
-df = pd.concat(dataframes, axis=0, keys=algorithms.keys())
-df.to_csv(path_to_current_run / 'benchmark_greedy.csv')
+        circuit_output_data_list = []
+        for name, graph in zip(input_data["Name"], input_data["graph"]):
+            circuit_input_data = {"Name": [name], "graph": [graph]}
 
-# Save the metadata
-run_meta_data = {
-    "unique_id": unique_id,
-    "seed": seed,
-    "lookahead": lookahead,
-    "threshold": threshold,
-    "algorithms": list(algorithms.keys()),
-    "columns": columns,
-    "rows": rows,
-    "path_to_circuits": str(path_to_circuits),
-    "date": time.strftime("%Y-%m-%d %H:%M:%S")
-}
+            with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
+                # Run the algorithm and get the output data
+                output_data = executor.submit(run_algorithm, algorithm=algorithm, input_data=circuit_input_data, algorithm_name=algorithm_name, seed=seed, path_to_graphs=path_to_graphs, path_to_current_run=path_to_current_run, pre_tr=pre_tr).result()
 
-with open(f"{path_to_current_run}/metadata.json", 'w') as f:
-    f.write(json.dumps(run_meta_data, indent=4))
+                # output_data = run_algorithm(algorithm=algorithm, input_data=input_data, algorithm_name=algorithm_name, seed=seed, path_to_graphs=path_to_graphs, path_to_current_run=path_to_current_run, pre_tr=pre_tr)
+                # Add the output data to the dataframe
+                circuit_output_data_list.append(output_data)
+
+        output_data_for_algorithms.append({k: v for d in circuit_output_data_list for k, v in d.items()})
+
+    # Concatenate the dataframes and save them to a csv file
+    dataframe_data = {}
+    for algo_data in output_data_for_algorithms:
+        for key, value in algo_data.items():
+            new_value = dataframe_data.get(key, [])
+            new_value.append(value)
+            dataframe_data[key] = new_value
+
+    df = pd.DataFrame.from_dict(dataframe_data, orient='index', columns=algorithms.keys(), dtype=int)
+    df.index = pd.MultiIndex.from_tuples(df.index)
+    df.to_csv(path_to_current_run / 'benchmark_greedy.csv')
+
+    # Save the metadatab
+    run_meta_data = {
+        "unique_id": unique_id,
+        "seed": seed,
+        "lookahead": lookahead,
+        "threshold": threshold,
+        "algorithms": list(algorithms.keys()),
+        "columns": input_data["Name"],
+        "rows":  list(output_data_or.keys()),
+        "path_to_circuits": str(path_to_circuits),
+        "date": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+
+    with open(f"{path_to_current_run}/metadata.json", 'w') as f:
+        f.write(json.dumps(run_meta_data, indent=4))
+
+if __name__ == "__main__":
+    run_benchmark()
