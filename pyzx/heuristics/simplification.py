@@ -826,7 +826,11 @@ class WireReducer:
         self.flow_function: FilterFlowFunc = flow_function
         self.quiet = quiet
         self.stats = stats
+
+
         self.graph.track_phases = False
+        # TODO: This needs to be combined with neighbor unfusion
+        self.use_lookup_dictionary = False
 
         self._lookup_flow_for_unfusion: Dict[Tuple[VT, VT], bool] = {}
         self._use_lookup_flow_for_unfusion = False
@@ -883,6 +887,8 @@ class WireReducer:
                 disentangle_outputs(self.graph)
                 if not self._is_graph_flow_preserving(self.graph):
                     raise Exception("Graph is not C-flow preserving")
+
+
 
     def greedy_wire_reduce(self):
         self.has_changes_occurred = True
@@ -1273,7 +1279,8 @@ class WireReducer:
 
         if not skip_flow_calculation:
             if is_match_unfusing(match):
-                # flow_function = self._lookup_flow_preserving_for_edge
+                if self.use_lookup_dictionary:
+                    flow_function = self._lookup_flow_preserving_for_edge
                 match_group = "unfusing"
             elif is_match_boundary(graph, match):
                 match_group = "boundary"
