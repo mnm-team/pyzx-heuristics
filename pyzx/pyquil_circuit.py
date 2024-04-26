@@ -15,12 +15,12 @@
 # limitations under the License.
 
 from pyquil import Program, get_qc
-from pyquil.gates import CNOT, S, T, RZ, H, CZ
+from pyquil.gates import CNOT, S, T, RZ, H, CZ, Z
 from pyquil.quil import Pragma
-from pyquil.api import LocalQVMCompiler
-from pyquil.parser import parse as parse_quil
+from pyquil.api import WavefunctionSimulator, _quantum_computer
 from pyquil.quilbase import Pragma, Gate
 from numpy import pi
+from qcs_sdk import QCSClient
 
 from pyzx.routing.parity_maps import CNOT_tracker
 from pyzx.circuit import Circuit
@@ -30,20 +30,29 @@ class PyQuilCircuit(CNOT_tracker):
     def __init__(self, architecture, **kwargs):
         """
         Class to represent a PyQuil program to run on/be compiled for the given architecture
-        Currently, it assumes the architecture given by create_9x9_square_architecture()
 
         :param architecture: The Architecture object to adhere to
         """
 
-        super().__init__(**kwargs)
-        self.qc = get_qc('9q-square-qvm')
-        device = architecture.to_quil_device()
-        compiler = LocalQVMCompiler(endpoint=self.qc.compiler.endpoint, device=device)
-        self.qc.device = device
+        super().__init__(n_qubits=architecture.n_qubits, **kwargs)
+        client_configuration = QCSClient.load()
+        topology = architecture.to_quil_topology()
+        self.qc = _quantum_computer._get_qvm_with_topology(
+                                        client_configuration=client_configuration,
+                                        name=f"{architecture.n_qubits}q-{architecture.name}-pyqvm",
+                                        topology=topology,
+                                        noisy=False,
+                                        qvm_type="pyqvm",
+                                        compiler_timeout=30.0,
+                                        execution_timeout=30.0,
+                                        quilc_client=None,
+                                        qvm_client=None,
+                                    )
+        compiler = WavefunctionSimulator()
         self.qc.compiler = compiler
-        self.n_qubits = architecture.n_qubits
+
         self.program = Program()
-        super().__init__(self.n_qubits)
+
         self.retries = 0
         self.max_retries = 5
         self.compiled_program = None
@@ -112,6 +121,8 @@ class PyQuilCircuit(CNOT_tracker):
                     self.program += T(gate.target)
                 elif gate.name == "T*":
                     self.program += RZ(3*pi/4, gate.target)
+                elif gate.name == "Z":
+                    self.program += Z(gate.target)
                 else:
                     print(f"Warning: PyquilCircuit does not currently support the gate '{gate}'.")
 
@@ -125,7 +136,7 @@ class PyQuilCircuit(CNOT_tracker):
 
     @staticmethod
     def from_circuit(circuit, architecture):
-        new_circuit = PyQuilCircuit(architecture, n_qubits=circuit.qubits, name=circuit.name)
+        new_circuit = PyQuilCircuit(architecture)
         new_circuit.gates = circuit.gates
         new_circuit.update_program()
         return new_circuit
@@ -138,7 +149,7 @@ class PyQuilCircuit(CNOT_tracker):
         try:
             ep = self.qc.compile(self.program)
             self.retries = 0
-            self.compiled_program = parse_quil(ep.program)
+            self.compiled_program = ep.program
             return ep.program
         except KeyError as e:
             print('Oops, retrying to compile.', self.retries)

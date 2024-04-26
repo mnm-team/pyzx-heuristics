@@ -1,8 +1,11 @@
-import copy
+from fractions import Fraction
 import itertools
-from typing import Dict, Set, Tuple
+import logging
+from typing import Dict, Final, List, Literal, Optional, Set, Tuple
 from pyzx.graph.base import BaseGraph, VT, ET, EdgeType
-from pyzx.graph.graph_s import GraphS
+from pyzx.linalg import CNOTMaker, Mat2
+from pyzx.utils import VertexType, phase_is_true_clifford
+
 
 def calculate_lcomp(graph: BaseGraph[VT,ET], vertex: VT):
   """
@@ -221,53 +224,249 @@ def update_gflow_from_lcomp(graph: BaseGraph[VT,ET], lcomp_vertex: VT, gflow):
 
 
 
-
-
 Flow = Tuple[Dict[VT, Set[VT]], Dict[VT,int]]
 
-def cflow(g: BaseGraph[VT, ET]) -> Flow:
-    solved = set(g.outputs())
-    correctors = set()
-    past: Dict[VT, int] = dict()
-    res: Flow = (dict(),dict())
-    inputs = [list(g.neighbors(i))[0] for i in g.inputs()]
+def identify_cflow(g: BaseGraph[VT, ET]) -> Optional[Flow]:
+  solved = set(g.outputs())
+  correctors = set()
+  past: Dict[VT, int] = dict()
+  res: Flow = (dict(),dict())
+  inputs = [list(g.neighbors(i))[0] for i in g.inputs()]
 
-    for o in g.outputs():
-        n = list(g.neighbors(o))[0]
-        res[0][n] = set()
-        res[1][n] = 0
-        solved.add(n)
-        if not n in inputs:
-            past[n] = len(set(g.neighbors(n)).difference(solved))
-            if past[n] == 1:
-                correctors.add(n)
-    
-    depth = 1
+  for o in g.outputs():
+      n = list(g.neighbors(o))[0]
+      res[0][n] = set()
+      res[1][n] = 0
+      solved.add(n)
+      if not n in inputs:
+          past[n] = len(set(g.neighbors(n)).difference(solved))
+          if past[n] == 1:
+              correctors.add(n)
+  
+  depth = 1
 
-    while True:
-        new_corrections = set()
+  while True:
+      new_corrections = set()
 
-        for corrector in correctors:
-            candidates = set(g.neighbors(corrector)).difference(solved)
-            if len(candidates) == 1:
-                candidate = candidates.pop()
-                res[0][candidate] = set([corrector])
-                res[1][candidate] = depth
-                solved.add(candidate)
-                if not candidate in inputs:
-                    past[candidate] = len(set(g.neighbors(candidate)).difference(solved))
-                    if past[candidate] == 1:
-                        new_corrections.add(candidate)
-                for neighbor in g.neighbors(candidate):
-                    if neighbor in past:
-                        past[neighbor] -= 1
-                        if past[neighbor] == 1:
-                            new_corrections.add(neighbor)
+      for corrector in correctors:
+          candidates = set(g.neighbors(corrector)).difference(solved)
+          if len(candidates) == 1:
+              candidate = candidates.pop()
+              res[0][candidate] = set([corrector])
+              res[1][candidate] = depth
+              solved.add(candidate)
+              if not candidate in inputs:
+                  past[candidate] = len(set(g.neighbors(candidate)).difference(solved))
+                  if past[candidate] == 1:
+                      new_corrections.add(candidate)
+              for neighbor in g.neighbors(candidate):
+                  if neighbor in past:
+                      past[neighbor] -= 1
+                      if past[neighbor] == 1:
+                          new_corrections.add(neighbor)
 
-        if not new_corrections:
-            if len(solved) == g.num_vertices() - g.num_inputs():
-                return res
-            return None
-        
-        correctors = new_corrections
+      if not new_corrections:
+          if len(solved) == g.num_vertices() - g.num_inputs():
+              return res
+          return None
+      
+      correctors = new_corrections
+      depth += 1
+
+
+#Copy from extract.py but necessary since otherwise we have circular import problems
+def bi_adj(g: BaseGraph[VT,ET], vs:List[VT], ws:List[VT]) -> Mat2:
+  """Construct a biadjacency matrix between the supplied list of vertices
+  ``vs`` and ``ws``."""
+  return Mat2([[1 if g.connected(v,w) else 0 for v in vs] for w in ws])
+
+def get_gauss_solution(gauss: Mat2, vec: Mat2, cnots: CNOTMaker):
+  for cnot in cnots:
+    vec.row_add(cnot.target,cnot.control)
+  x = Mat2.zeros(gauss.cols(),1)
+  for i,row in enumerate(gauss.data):
+      got_pivot = False
+      for j,v in enumerate(row):
+          if v != 0:
+              got_pivot = True
+              x.data[j][0] = vec.data[i][0]
+              break
+      # zero LHS with non-zero RHS = no solutions
+      if not got_pivot and vec.data[i][0] != 0:
+          return None
+  return x
+
+def identify_gflow(g: BaseGraph[VT,ET]) -> Optional[Flow]:
+  """
+    Based on algorithm by Perdrix and Mhalla. Here is the pseudocode from
+    dx.doi.org/10.1007/978-3-540-70575-8_70
+
+    ```
+    input : An open graph
+    output: A generalised flow
+
+    gFlow (V,Gamma,In,Out) =
+    begin
+      for all v in Out do
+        l(v) := 0
+      end
+      return gFlowaux (V,Gamma,In,Out,1)
+    end
+
+    gFlowaux (V,Gamma,In,Out,k) =
+    begin
+      C := {}
+      for all u in V \ Out do
+        Solve in F2 : Gamma[V \ Out, Out \ In] * I[X] = I[{u}]
+        if there is a solution X0 then
+          C := C union {u}
+          g(u) := X0
+          l(u) := k
+        end
+      end
+      if C = {} then
+        return (Out = V,(g,l))
+      else
+        return gFlowaux (V, Gamma, In, Out union C, k + 1)
+      end
+    end
+    ```
+  """
+  l:     Dict[VT,int]      = {}
+  gflow: Dict[VT, Set[VT]] = {}
+  for v in g.outputs():
+      l[v] = 0
+
+  inputs = set(g.inputs())
+  processed = set(g.outputs())
+  vertices = set(g.vertices())
+  k = 1
+  while True:
+      correct = set()
+      #unprocessed = list()
+      processed_prime = [v for v in processed.difference(inputs) if any(w not in processed for w in g.neighbors(v))]
+      candidates = [v for v in vertices.difference(processed) if any(w in processed_prime for w in g.neighbors(v))]
+      
+      zerovec = Mat2([[0] for i in range(len(candidates))])
+      #print(unprocessed, processed_prime, zerovec)
+      m = bi_adj(g, processed_prime, candidates)
+      cnot_maker = CNOTMaker()
+      m.gauss(x=cnot_maker, full_reduce=True)
+      for u in candidates:
+          vu = zerovec.copy()
+          vu.data[candidates.index(u)] = [1]
+          x = get_gauss_solution(m, vu, cnot_maker.cnots)
+          if x:
+              correct.add(u)
+              gflow[u] = {processed_prime[i] for i in range(x.rows()) if x.data[i][0]}
+              l[u] = k
+
+      if not correct:
+          if not candidates:
+              return (gflow, l)
+          return None
+      else:
+          processed.update(correct)
+          k += 1
+
+
+
+class MeasurementType:
+  """Measurement Type of a Z spider in a graph-like diagram"""
+  Type = Literal[0,1,2,3,4,5]
+  XY: Final = 0
+  XZ: Final = 1
+  YZ: Final = 2
+  X: Final = 3
+  Y: Final = 4
+  Z: Final = 5
+  EFFECT: Final = 6 #spider does not have a measurement plane but is part of an XZ or YZ measurement, i.e. the upper part of phase gadget
+
+#TODO: Would make more sense if this was a proeperty of the graph
+def get_measurement_types(graph: BaseGraph[VT,ET]):
+  """Get the measurement types of the vertices in the graph."""
+  measurements: Dict[int, MeasurementType.Type] = dict()
+  for vertex in graph.vertices():
+    neighbors = list(graph.neighbors(vertex))
+    num_neighbors = len(neighbors)
+    if num_neighbors == 1 and graph.type(vertex=vertex) != VertexType.BOUNDARY and graph.edge_type(graph.edge(vertex, neighbors[0])) == EdgeType.HADAMARD:
+      if phase_is_true_clifford(graph.phase(neighbors[0])):
+        measurements[vertex] = MeasurementType.EFFECT
+        measurements[neighbors[0]] = MeasurementType.XZ
+      else:
+        measurements[vertex] = MeasurementType.EFFECT
+        measurements[neighbors[0]] = MeasurementType.YZ
+    else:
+      if vertex not in measurements.keys():
+        measurements[vertex] = MeasurementType.XY #default
+  return measurements
+
+def mvertices(graph: BaseGraph[VT,ET], mtypes):
+  return set(graph.vertices()).difference(set(graph.inputs())).difference(set(graph.outputs())).difference(set([v for v in graph.vertices() if mtypes[v] == MeasurementType.EFFECT]))
+
+def minputs(graph: BaseGraph[VT,ET]):
+  return set([list(graph.neighbors(input))[0] for input in graph.inputs()])
+
+def moutputs(graph: BaseGraph[VT,ET]):
+  return set([list(graph.neighbors(output))[0] for output in graph.outputs()])
+
+def neighbors_without_effect_or_boundary(graph, vertex, mtypes):
+  return [n for n in graph.neighbors(vertex) if mtypes[n] != MeasurementType.EFFECT]# and graph.type(n) != VertexType.BOUNDARY]
+
+def identify_gflow_with_gadgets(g: BaseGraph[VT,ET]) -> Optional[Flow]:
+  """Compute maximally delayed gflow of a graph-like diagram as in https://arxiv.org/pdf/2003.01664.pdf"""
+
+  res: Flow = (dict(), dict())
+  
+  # processed = set(moutputs(g))
+  # inputs = set(minputs(g))
+  processed = set(g.outputs())
+  inputs = set(g.inputs())
+
+  mtypes = get_measurement_types(g)
+  # vertices: Set[VT] = set(mvertices(g, mtypes))
+  vertices: Set[VT] = g.vertex_set()
+  depth: int = 1
+  
+  for v in processed:
+      res[1][v] = 0
+  
+  while True:
+      correct = set()
+      processed_prime = [v for v in processed.difference(inputs) if any(w not in processed for w in neighbors_without_effect_or_boundary(g,v,mtypes))]
+      candidates = [v for v in vertices.difference(processed) if any(w in processed_prime for w in neighbors_without_effect_or_boundary(g,v,mtypes))]
+
+      zerovec = Mat2([[0] for _ in range(len(candidates))])
+      m = bi_adj(g, processed_prime, candidates)
+
+      cnot_maker = CNOTMaker()
+      m.gauss(x=cnot_maker, full_reduce=True)
+
+      for u in candidates:
+          vu = zerovec.copy()
+          mtype = mtypes[u]
+
+          if mtype in [MeasurementType.XZ, MeasurementType.YZ]:
+            vu = Mat2([[1] if candidates[i] in neighbors_without_effect_or_boundary(g,u,mtypes) else [0] for i in range(len(candidates))])
+  
+          if mtype in [MeasurementType.XY, MeasurementType.XZ]:
+            vu.data[candidates.index(u)] = [1] if vu.data[candidates.index(u)] == [0] else [0]
+
+
+          x = get_gauss_solution(m, vu, cnot_maker.cnots)
+
+          if x:
+            correct.add(u)
+            res[0][u] = {processed_prime[i] for i in range(x.rows()) if x.data[i][0]}
+            if mtype != MeasurementType.XY:
+                res[0][u].add(u)
+            res[1][u] = depth
+
+      if not correct:
+        if not candidates:
+            inv_depth = res[1] #inverse_depth(res[1])
+            return (res[0], inv_depth)
+        return None
+      else:
+        processed.update(correct)
         depth += 1

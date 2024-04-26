@@ -258,26 +258,25 @@ class Architecture():
     def get_neighboring_vertices(self, vertex: int) -> Set[int]:
         return set(self.graph.neighbors(vertex))
 
-    def to_quil_device(self):
+    def to_quil_topology(self):
         # Only required here
         import networkx as nx
-        from pyquil.device import NxDeviceA
         edges = [edge for edge in self.graph.edges() if edge[0] in self.vertices]
         topology = nx.from_edgelist(edges)
-        device = NxDevice(topology)
-        return device
+        return topology
 
     def visualize(self, filename=None):
         import networkx as nx
         import matplotlib.pyplot as plt
-        plt.switch_backend('agg')
+        # plt.switch_backend('agg')
         g = nx.Graph()
         g.add_nodes_from(self.vertices)
         g.add_edges_from(self.graph.edges())
         nx.draw(g, with_labels=True, font_weight='bold')
-        if filename is None:
-            filename = self.name + ".png"
-        plt.savefig(filename)
+        if filename is not None:
+            # filename = self.name + ".png"
+            plt.savefig(filename)
+        plt.draw()
 
     def floyd_warshall(self, subgraph_vertices: List[int], upper: bool=True, rec_vertices: List[int]=[]) -> Dict[Tuple[int,int], Tuple[int,List[Tuple[int,int]]]]:
         """

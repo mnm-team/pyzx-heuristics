@@ -1,4 +1,5 @@
 from fractions import Fraction
+from pyzx.graph.base import BaseGraph
 from pyzx.utils import VertexType, EdgeType
 
 
@@ -12,16 +13,14 @@ def split_phases(orig_phase: Fraction, desired_phase: Fraction):
     orig_phase_n = int(orig_phase.numerator*(extend_denom/orig_phase.denominator))
     desired_phase_n = int(desired_phase.numerator*(extend_denom/desired_phase.denominator))
     return Fraction( int((orig_phase_n- desired_phase_n) % (extend_denom*2)), extend_denom)
-
-
-'''
-inserts hadamard wire + empty Z + hadamard wire between two vertices.
-This does not change the standard interpretation, as two hadamards are equal to the identity
-and the empty z spider as well
-CAUTION: may break gflow property of graph if applied to the wrong vertices (see heuristics/get_possible_unfusion_neighbours)
-'''
     
 def insert_identity(g, v1, v2) -> int:
+    '''
+    inserts hadamard wire + empty Z + hadamard wire between two vertices.
+    This does not change the standard interpretation, as two hadamards are equal to the identity
+    and the empty z spider as well
+    CAUTION: may break gflow property of graph if applied to the wrong vertices (see heuristics/get_possible_unfusion_neighbours)
+    '''
     orig_type = g.edge_type(g.edge(v1, v2))
     if g.connected(v1, v2):
         g.remove_edge(g.edge(v1, v2))
@@ -32,6 +31,17 @@ def insert_identity(g, v1, v2) -> int:
     else:
         g.add_edge((vmid,v2), EdgeType.HADAMARD)
     return vmid
+
+def disentangle_outputs(g: BaseGraph):
+    """helper function to put outputs of graph-like diagram in a form where they have an empty phase and are not interconnected
+    This may be needed to have flow"""
+    output_neighbors = dict()
+    for o in g.outputs():
+        n = list(g.neighbors(o))[0]
+        output_neighbors[o] = n
+    for o, n in output_neighbors.items():
+        if g.phase(n) != 0 or set(g.neighbors(n)).intersection(set(output_neighbors.values())):
+            insert_identity(g, n, o) 
 
 
 def insert_phase_gadget(g,vertex,desired_phase):
