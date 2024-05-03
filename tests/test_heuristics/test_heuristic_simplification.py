@@ -12,7 +12,7 @@ import pyzx as zx
 from pyzx.simplify import spider_simp, to_gh
 from pyzx.graph.base import BaseGraph
 from pyzx.heuristics.simplification import FilterFlowFunc, MatchType, apply_lcomp, apply_pivot, get_match_type, lcomp_matcher, pivot_matcher, update_matches
-from pyzx.extract import extract_architecture_aware_circuit
+from pyzx.heuristics.extraction import extract_architecture_aware_circuit
 from pyzx.routing.architecture import create_line_architecture
 
 
@@ -250,7 +250,7 @@ class TestHeuristics():
 
         architecture = create_line_architecture(graph.qubit_count())
         graph_simp = graph.copy()
-        new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=True, quiet=True)
+        new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture_copy=architecture, up_to_perm=True, quiet=True)
 
         for gate in new_circuit.gates:
             if gate.name == "CNOT":
@@ -271,7 +271,7 @@ class TestHeuristics():
 
             architecture = create_line_architecture(graph.qubit_count())
             graph_simp = graph.copy()
-            new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture=architecture, up_to_perm=False, quiet=True)
+            new_circuit = extract_architecture_aware_circuit(g=graph_simp, architecture_copy=architecture, up_to_perm=False, quiet=True)
 
             assert zx.compare_tensors(circuit, new_circuit)
                 
