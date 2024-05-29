@@ -1,19 +1,86 @@
+from dataclasses import dataclass, field
 import itertools
 import math
 import random
 
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from fractions import Fraction
+
+import numpy as np
 
 from pyzx.circuit import Circuit
 from pyzx.circuit.gates import CNOT, CZ, HAD, Gate, ZPhase
-from pyzx.extract import column_optimal_swap, connectivity_from_biadj, filter_duplicate_cnots, graph_to_swaps, greedy_reduction, max_overlap
+from pyzx.extract import column_optimal_swap, connectivity_from_biadj, filter_duplicate_cnots, graph_to_swaps, max_overlap, xor_rows
 from pyzx.graph.base import ET, VT, BaseGraph
-from pyzx.linalg import CNOTMaker, Mat2
+from pyzx.linalg import Z2, CNOTMaker, Mat2
 from pyzx.routing.architecture import Architecture
 from pyzx.routing.cnot_mapper import ElimMode, gauss
 from pyzx.simplify import id_simp, apply_rule, pivot, lcomp_with_boundaries
 from pyzx.utils import EdgeType, FractionLike, VertexType, phase_is_true_clifford, toggle_edge
+
+
+@dataclass
+class ExtractionInstruction:
+    gate_list: list[Gate] = field(default_factory=list)
+    edge_change: set[Tuple[ET, EdgeType]] = field(default_factory=set)
+    vertex_change: set[Tuple[VT, float]] = field(default_factory=set)
+    edge_removal: set[ET] = field(default_factory=set)
+
+
+class MCP(Gate):
+    name = 'MCP'
+    qasm_name = 'mcp'
+    print_phase = True
+    def __init__(self, controls: List[int], target: int, phase: FractionLike) -> None:
+        self.target = target
+        self.controls = controls
+        self.phase = phase
+
+    def to_basic_gates(self):
+        all_qubits = self.controls+[self.target]
+        gates = []
+        odd_phase = self.phase/(2**len(self.controls))
+        even_phase = -odd_phase
+        for degree in range(2,len(all_qubits)+1):
+            combinations = list(itertools.combinations(all_qubits, degree))
+            for combination in combinations:
+                for idx in range(0,len(combination)-1):
+                    gates.append(CNOT(combination[idx],combination[idx+1]))
+                gates.append(ZPhase(combination[-1], odd_phase if degree % 2 == 1 else even_phase))
+                for idx in range(len(combination)-2,-1,-1):
+                    gates.append(CNOT(combination[idx],combination[idx+1]))
+        for qubit in all_qubits:
+            gates.append(ZPhase(qubit, odd_phase))
+        return gates                
+
+    def to_graph(self, g, q_mapper, c_mapper):
+        for gate in self.to_basic_gates():
+            gate.to_graph(g, q_mapper, c_mapper)
+    
+    def to_qasm(self) -> str:
+        phase = "({}*pi)".format(float(self.phase))
+        if len(self.controls) == 1:
+            return "cp"+phase+" q["+str(self.controls[0])+"], q["+str(self.target)+"];"
+        else:
+            name = "mcp"+str(len(self.controls)+1)
+            control_string = "".join(["q["+str(control)+"], " for control in self.controls])
+            return name+phase+" "+control_string+" q["+str(self.target)+"];"
+        
+
+class SHUTTLE(CZ):
+    name = 'Shuttle'
+    qasm_name = 'shuttle'
+    qc_name = 'undefined'
+    quipper_name = 'undefined'
+
+    def to_basic_gates(self):
+        c1 = CNOT(self.control, self.target)
+        c2 = CNOT(self.target, self.control)
+        return [c1,c2,c1]
+
+    def to_graph(self, g, q_mapper, c_mapper):
+        for gate in self.to_basic_gates():
+            gate.to_graph(g, q_mapper, c_mapper)
 
 
 def bi_adj(g: BaseGraph[VT,ET], vs:List[VT], ws:List[VT]) -> Mat2:
@@ -24,6 +91,383 @@ def bi_adj(g: BaseGraph[VT,ET], vs:List[VT], ws:List[VT]) -> Mat2:
         vs_copy.append(-1)
 
     return Mat2([[0 if (w == -1 or v == -1) else int(g.connected(v,w)) for v in vs_copy] for w in ws])
+
+
+def get_best_cnot_configuration(cnots_list: List[List[List[CNOT]]], architecture: Architecture) -> Tuple[List[CNOT], Optional[SHUTTLE]]:
+    """Given a list of lists of CNOTs, returns the list with the fewest CNOTs"""
+    if not cnots_list:
+        return []
+    
+    best_result = (None, None, math.inf)
+    
+    for cnots in cnots_list:
+        if any(len(rerouted_cnots) > 1 for rerouted_cnots in cnots):
+            shuttle_gate, new_cnots, new_cost = check_shuttling(cnots, architecture)
+            if new_cost < best_result[2]:
+                best_result = (new_cnots, shuttle_gate, new_cost)
+        else:
+            if len(cnots) < best_result[2]:
+                best_result = (cnots, None, sum(len(rerouted_cnots) for rerouted_cnots in cnots))
+
+    return [item for sublist in best_result[0] for item in sublist], best_result[1]
+
+
+def check_shuttling(cnots_list: List[List[CNOT]], architecture: Architecture) -> Tuple[Optional[SHUTTLE], List[List[CNOT]], int]:
+    """Given a list of rerouted CNOTs, check if a shuttling operation is better than the current configuration"""
+    #TODO: This needs to be implemented
+    # cnot_list_dict: list[dict] = []
+    # for cnots in cnots_list:
+    #     cnot_dict = {"original": None, "rerouted": None}
+    #     if len(cnots) == 1:
+    #         cnot_dict["original"] = cnots[0]
+    #     else:
+    #         cnot_dict["rerouted"] = cnots
+    #         min_control = min(cnots, key=lambda x: x.control).control
+    #         min_target = min(cnots, key=lambda x: x.target).target
+
+    #         max_control = max(cnots, key=lambda x: x.control).control
+    #         max_target = max(cnots, key=lambda x: x.target).target
+
+    #         if min_control < min_target:
+    #             cnot_dict["original"] = CNOT(min_control, max_target)
+    #         else:
+    #             cnot_dict["original"] = CNOT(max_control, min_target)
+    #     cnot_list_dict.append(cnot_dict)
+
+            
+
+    max_rerouting_index = max(enumerate(cnots_list), key=lambda x: len(x[1]))[0]
+
+    basic_cnots: List[CNOT] = []
+    for cnots in cnots_list:
+
+        if len(cnots) == 1:
+            basic_cnots.append(cnots[0])
+            continue
+
+        min_control = min(cnots, key=lambda x: x.control).control
+        min_target = min(cnots, key=lambda x: x.target).target
+
+        max_control = max(cnots, key=lambda x: x.control).control
+        max_target = max(cnots, key=lambda x: x.target).target
+
+        if min_control < min_target:
+            basic_cnots.append(CNOT(min_control, max_target))
+        else:
+            basic_cnots.append(CNOT(max_control, min_target))
+
+    biggest_cnot = basic_cnots[max_rerouting_index]
+
+    if abs(biggest_cnot.control - biggest_cnot.target) <= 1:
+        return None, cnots_list, sum(len(cnots) for cnots in cnots_list)
+
+    if biggest_cnot.control < biggest_cnot.target:
+        best_shuttle = SHUTTLE(biggest_cnot.control, target=biggest_cnot.target-1)
+    else:
+        best_shuttle = SHUTTLE(biggest_cnot.control, target=biggest_cnot.target+1)
+   
+    # shuttled_graph = architecture.graph.copy()
+    # edges_v0 = shuttled_graph.incident_edges(best_shuttle.control)
+    # edges_v1 = shuttled_graph.incident_edges(best_shuttle.target)
+
+    # for v, w in edges_v0:
+    #     if shuttled_graph.edge(v, w) in edges_v1:
+    #         continue
+    #     shuttled_graph.remove_edge(shuttled_graph.edge(v, w))
+    #     if v == best_shuttle.control:
+    #         shuttled_graph.add_edge(shuttled_graph.edge(best_shuttle.target, w))
+    #     else:
+    #         shuttled_graph.add_edge(shuttled_graph.edge(v, best_shuttle.target))
+
+    # for v, w in edges_v1:
+    #     if shuttled_graph.edge(v, w) in edges_v0:
+    #         continue
+    #     shuttled_graph.remove_edge(shuttled_graph.edge(v, w))
+    #     if v == best_shuttle.target:
+    #         shuttled_graph.add_edge(shuttled_graph.edge(best_shuttle.control, w))
+    #     else:
+    #         shuttled_graph.add_edge(shuttled_graph.edge(v, best_shuttle.control))
+
+    # shuttled_architecture = Architecture(name="Shuttled Architecture", coupling_graph=shuttled_graph, qubit_map=list(range(shuttled_graph.num_vertices())))
+
+    new_cnots_list = []
+    for cnot in basic_cnots:
+        cnot_copy = cnot.copy()
+
+        current_target = cnot_copy.target
+        current_control = cnot_copy.control
+
+        if current_target == best_shuttle.target:
+            cnot_copy.target = best_shuttle.control
+        elif current_target == best_shuttle.control:
+            cnot_copy.target = best_shuttle.target
+        elif current_control == best_shuttle.target:
+            cnot_copy.control = best_shuttle.control
+        elif current_control == best_shuttle.control:
+            cnot_copy.control = best_shuttle.target
+
+        new_cnots_list.append(build_connection_from_architecture(architecture, cnot_copy))
+
+    if sum(len(cnots) for cnots in new_cnots_list)+6 > sum(len(cnots) for cnots in cnots_list):
+        return None, cnots_list, sum(len(cnots) for cnots in cnots_list)
+    else:
+        return best_shuttle, new_cnots_list, sum(len(cnots) for cnots in new_cnots_list)+6
+
+
+def find_minimal_sums_with_architecture(m: Mat2, architecture:Architecture, result_amount_limit:int=5, reversed_search=False) -> Optional[Tuple[int, ...]]:
+    """Returns a list of rows in m that can be added together to reduce one of the rows so that
+    it only contains a single 1. Used in :func:`greedy_reduction`"""
+
+    results = []
+
+    r = m.rows()
+    d = m.data
+    if any(sum(r) == 1 for r in d):
+        return tuple()
+    combs:  Dict[Tuple[int, ...], List[Z2]] = {(i,): d[i] for i in range(r)}
+    combs2: Dict[Tuple[int, ...], List[Z2]] = {}
+    iterations = 0
+    while True:
+        combs2 = {}
+        for index, l in combs.items():
+            max_index: int = max(index)
+            rr: range = range(max_index + 1, r) if not reversed_search else range(r - 1, max_index, -1)
+            for k in rr:
+                if architecture and not architecture.is_subgraph_connected([*index]+[k]): continue
+                # Unrolled xor_rows(combs[index],d[k])
+                row: List[Z2] = [0 if v1 == v2 else 1 for v1, v2 in zip(combs[index], d[k])]
+                # row = xor_rows(combs[index],d[k])
+                if sum(row) == 1:
+                    results.append((*index, k))
+                    # return (*index, k)
+                combs2[(*index, k)] = row
+                iterations += 1
+            if iterations > 100000:
+                return results
+        if not combs2:
+            return results
+            # raise ValueError("Irreducible input has been given")
+        if len(results) >= result_amount_limit:
+            return results
+        combs = combs2
+
+
+def move_control(gate:Gate, control:int, new_control:int):
+    """Given a gate and a control qubit, returns a new gate with the control qubit replaced with the new control qubit"""
+    gate_copy = gate.copy()
+    if hasattr(gate, "control"):
+        gate_copy.control = new_control
+    elif hasattr(gate, "controls"):
+        gate_copy.controls = [new_control if c == control else c for c in gate.controls]
+    return gate_copy
+
+
+def move_target(gate:Gate, new_target:int):
+    """Given a gate and a target qubit, returns a new gate with the target qubit replaced with the new target qubit"""
+    gate_copy = gate.copy()
+    gate_copy.target = new_target
+    return gate_copy
+
+
+def move_control_to_next(architecture:Architecture, path:List[int], gate:Gate) -> List[Gate]:
+
+    rerouting_result = []
+
+    gate_copy = move_control(gate, path[0], path[-2])
+    
+    for i in range(len(path)-2):
+        rerouting_result.append(CNOT(path[i+1], path[i]))
+        rerouting_result.append(CNOT(path[i], path[i+1]))
+    rerouting_result.extend(build_connection_from_architecture(architecture, gate_copy))
+    for i in range(len(path)-2, 0, -1):
+        rerouting_result.append(CNOT(path[i-1], path[i]))
+        rerouting_result.append(CNOT(path[i], path[i-1]))
+
+    return rerouting_result
+
+
+def move_target_to_control(architecture:Architecture, path:List[int], gate:Gate) -> List[Gate]:
+
+    rerouting_result = []
+
+    gate_copy = move_target(gate, path[1])
+    
+    for i in range(len(path)-1, 1, -1):
+        rerouting_result.append(CNOT(path[i-1], path[i]))
+        rerouting_result.append(CNOT(path[i], path[i-1]))
+    rerouting_result.extend(build_connection_from_architecture(architecture, gate_copy))
+    for i in range(1, len(path)-1):
+        rerouting_result.append(CNOT(path[i], path[i+1]))
+        rerouting_result.append(CNOT(path[i+1], path[i]))
+
+    return rerouting_result
+
+
+def build_connection_from_architecture(architecture: Architecture, gate:Gate) -> List[CNOT]:
+    """Given a gate and an architecture, returns a list of CNOTs that connect the qubits of the gate
+    according to the architecture"""
+
+    if not hasattr(gate, "target"):
+        raise ValueError("Gate does not have a target qubit")
+    
+    target_qubit = gate.target
+
+    if not hasattr(gate, "control"):
+        if not hasattr(gate, "controls"):
+            raise ValueError("Gate does not have controls")
+        else:
+            control_qubits = gate.controls
+    else:
+        control_qubits = [gate.control]
+
+    if architecture and not architecture.is_subgraph_connected([target_qubit]+control_qubits):
+
+        if len(control_qubits) > 1:
+            path_dict = {qubit:None for qubit in [target_qubit]+control_qubits}
+
+            for control_qubit_index in range(len(control_qubits)):
+                current_control_qubit = control_qubits[control_qubit_index]
+
+                path_to_target = architecture.shortest_path(current_control_qubit, target_qubit)
+                if len(path_to_target) > 2:
+                    if not path_dict[target_qubit] or len(path_dict[target_qubit]) > len(path_to_target):
+                        path_dict[target_qubit] = path_to_target
+
+                for next_control_qubit_index in range(control_qubit_index+1, len(control_qubits)):
+                    next_control_qubit = control_qubits[next_control_qubit_index]
+                    path_to_next_control = architecture.shortest_path(current_control_qubit, next_control_qubit)
+
+                    if len(path_to_next_control) > 2:
+                        if not path_dict[current_control_qubit] or len(path_dict[current_control_qubit]) > len(path_to_next_control):
+                            path_dict[current_control_qubit] = path_to_next_control
+            
+            start, min_path = min(path_dict.items(), key=lambda x: len(x[1]) if x[1] else math.inf)
+
+            if not min_path:
+                return [gate]
+
+            if start in control_qubits:
+                return move_control_to_next(architecture, min_path, gate)
+            elif start == target_qubit:
+                return move_target_to_control(architecture, min_path, gate)
+
+        elif len(control_qubits) == 1:
+            shortest_path = architecture.shortest_path(control_qubits[0], target_qubit)
+
+            if not shortest_path:
+                raise ValueError("Architecture is not connected")
+            
+            if isinstance(gate, MCP):
+                return move_control_to_next(architecture, shortest_path, gate)
+            
+            gate_copy = move_control(gate, control_qubits[0], shortest_path[-2])
+
+            rerouting_result = []
+            
+            #TODO: check for shuttling
+            for i in range(len(shortest_path)-2):
+                rerouting_result.append(CNOT(shortest_path[i], shortest_path[i+1]))
+            rerouting_result.append(gate_copy)
+            for i in range(len(shortest_path)-2, 0, -1):
+                rerouting_result.append(CNOT(shortest_path[i-1], shortest_path[i]))
+
+            for i in range(1, len(shortest_path)-2):
+                rerouting_result.append(CNOT(shortest_path[i], shortest_path[i+1]))
+            rerouting_result.append(gate_copy)
+            for i in range(len(shortest_path)-2, 1, -1):
+                rerouting_result.append(CNOT(shortest_path[i-1], shortest_path[i]))
+
+        return rerouting_result
+    else:
+        return [gate]
+
+
+def greedy_reduction_with_architecture(m: Mat2, architecture: Architecture) -> Optional[List[List[List[CNOT]]]]:
+    """Returns a list of tuples (r1,r2) that specify which row should be added to which other row
+    in order to reduce one row of m to only contain a single 1. 
+    Used in :func:`extract_circuit` and :func:`lookahead_extract_base`"""
+    indices_list_greedy_row_add = find_minimal_sums_with_architecture(m, architecture=None)
+    if indices_list_greedy_row_add == []: return None
+
+    row_add_results = []
+    for indices_greedy_row_add in indices_list_greedy_row_add:
+        indices = list(indices_greedy_row_add)
+        rows = {i:m.data[i] for i in indices}
+        weights: Dict[int,int] = {i: sum(r) for i,r in rows.items()}
+        result = []
+        while len(indices)>1:
+            best = (-1,-1)
+            reduction = -10000
+            for i in indices:
+                for j in indices:
+                    if j <= i: continue
+                    w = sum(xor_rows(rows[i],rows[j]))
+                    cnot_cost = 1
+                    if j-i > 1:
+                        cnot_cost = 4*(j-i-1)
+                    if weights[i] - w - cnot_cost > reduction:
+                        best = (j,i) # "Add row j to i"
+                        reduction = weights[i] - w - cnot_cost
+                    if weights[j] - w - cnot_cost > reduction:
+                        best = (i,j)
+                        reduction = weights[j] - w - cnot_cost
+            rerouted_gates = build_connection_from_architecture(architecture, CNOT(best[0], best[1]))
+            result.append(rerouted_gates)
+            control, target = best
+            rows[target] = xor_rows(rows[control],rows[target])
+            weights[target] = weights[target] - reduction
+            indices.remove(control)
+
+        row_add_results.append(result)
+
+    return row_add_results
+
+
+def greedy_reduction_with_architecture2(m: Mat2, architecture: Architecture) -> Optional[List[List[CNOT]]]:
+    """Returns a list of tuples (r1,r2) that specify which row should be added to which other row
+    in order to reduce one row of m to only contain a single 1. 
+    Used in :func:`extract_circuit` and :func:`lookahead_extract_base`"""
+    indices_list_greedy_row_add = find_minimal_sums_with_architecture(m, architecture=architecture)
+    if indices_list_greedy_row_add == []: return None
+
+    row_add_results = []
+    for indices_greedy_row_add in indices_list_greedy_row_add:
+        indices = list(indices_greedy_row_add)
+        rows = {i:m.data[i] for i in indices}
+        weights: Dict[int,int] = {i: sum(r) for i,r in rows.items()}
+        result = []
+        while len(indices)>1:
+            best = (-1,-1)
+            reduction = -10000
+            for i in indices:
+                for j in indices:
+                    if j <= i: continue
+                    if architecture and not architecture.is_subgraph_connected([i,j]): continue
+                    w = sum(xor_rows(rows[i],rows[j]))
+                    if weights[i] - w > reduction:
+                        if not architecture or architecture.is_subgraph_connected(set(indices)-set([j])):
+                            best = (j,i) # "Add row j to i"
+                            reduction = weights[i] - w
+                    if weights[j] - w > reduction:
+                        if not architecture or architecture.is_subgraph_connected(set(indices)-set([i])):
+                            best = (i,j)
+                            reduction = weights[j] - w
+            result.append(best)
+            control, target = best
+            rows[target] = xor_rows(rows[control],rows[target])
+            weights[target] = weights[target] - reduction
+            indices.remove(control)
+
+        row_add_results.append(result)
+
+    cnots_list = []
+    for row_add_result in row_add_results:
+        # cnots = [[CNOT(control, target) for control, target in row_add_result] for row_add_result in row_add_result_list]
+        cnots = [CNOT(control, target) for control, target in row_add_result]
+        cnots_list.append(cnots)
+    return cnots_list
+
+
 
 def extract_architecture_aware_circuit(
         g: BaseGraph[VT, ET],
@@ -73,11 +517,15 @@ def extract_architecture_aware_circuit(
     czs_saved = 0
 
     architecture_copy = Architecture(name=architecture.name, coupling_graph=architecture.graph.copy(), qubit_map=list(range(len(frontier))))
+    shuttle_list = []
     
     while True:
         # preprocessing
         # FIXME: CZ's are not placed according to the architecture
-        czs_saved += clean_frontier_for_architecture(g, c, frontier, optimize_czs)
+        czs_saved_this_iteration, extraction_instructions = clean_frontier_for_architecture(g, frontier, optimize_czs)
+        czs_saved += czs_saved_this_iteration
+
+        apply_gates_to_circuit_and_graph(g, c, extraction_instructions)
         
         # Now we can proceed with the actual extraction
         # First make sure that frontier is connected in correct way to inputs
@@ -105,19 +553,47 @@ def extract_architecture_aware_circuit(
             neighbors2 = [neighbors[perm[i]] for i in range(len(neighbors))]
 
             m2 = bi_adj(g, neighbors2, frontier_with_removed.values())
-            m3 = m2.copy()
 
-            elim_mode = ElimMode.STEINER_MODE
-            # elim_mode = ElimMode.GAUSS_MODE
-            # elim_mode = ElimMode.GENETIC_STEINER_MODE
-            
-            cnots, rank = gauss(architecture=architecture_copy, matrix=m3, mode=elim_mode, full_reduce=True)
-            cnots = filter_duplicate_cnots(cnots)
+            m_greedy = m2.copy()
+            cnots_greedy_list = greedy_reduction_with_architecture(m_greedy, architecture_copy)
+
+            if not cnots_greedy_list:
+                m_gauss = m2.copy()
+
+                elim_mode = ElimMode.STEINER_MODE
+                # elim_mode = ElimMode.GAUSS_MODE
+                # elim_mode = ElimMode.GENETIC_STEINER_MODE
+                
+                cnots_steiner, rank = gauss(architecture=architecture_copy, matrix=m_gauss, mode=elim_mode, full_reduce=True)
+                cnots, shuttle = get_best_cnot_configuration([cnots_steiner], architecture_copy)
+                cnots = filter_duplicate_cnots(cnots)
+            else:
+                cnots, shuttle = get_best_cnot_configuration(cnots_greedy_list, architecture_copy)
+                cnots = filter_duplicate_cnots(cnots)
+                # cnots = [CNOT(cnot.target, cnot.control) for cnot in cnots]
+
 
             m = m2
             neighbors = neighbors2
 
-            if not quiet: print(f"Gaussian elimination with {[CNOT(cnot.target, cnot.control) for cnot in cnots]} CNOTs")
+
+            if shuttle:
+                shuttle_list.append(shuttle)
+                c.add_gate(shuttle)
+
+                temp = frontier[shuttle.control]
+                frontier[shuttle.control] = frontier[shuttle.target]
+                frontier[shuttle.target] = temp
+
+                m.row_add(shuttle.control, shuttle.target)
+                m.row_add(shuttle.target, shuttle.control)
+                m.row_add(shuttle.control, shuttle.target)
+
+
+            if not quiet: 
+                if shuttle: print(f"        Shuttle with {shuttle}")
+                if not cnots_greedy_list: print(f"      Gaussian elimination with {[CNOT(cnot.target, cnot.control) for cnot in cnots]} CNOTs")
+                else: print(f"      Greedy elimination with {[CNOT(cnot.target, cnot.control) for cnot in cnots]} CNOTs")
             # We now have a set of CNOTs that suffice to extract at least one vertex.
         else:
             if not quiet: print("Simple vertex")
@@ -128,6 +604,9 @@ def extract_architecture_aware_circuit(
             
     if optimize_czs:
         if not quiet: print("CZ gates saved:", czs_saved)
+
+    for shuttle in reversed(shuttle_list):
+        c.add_gate(shuttle)
     # Outside of loop. Finish up the permutation
     id_simp(g, quiet=True)  # Now the graph should only contain inputs and outputs
     # Since we were extracting from right to left, we reverse the order of the gates
@@ -136,25 +615,29 @@ def extract_architecture_aware_circuit(
 
 
 def clean_frontier_for_architecture(
-        g: BaseGraph[VT, ET], 
-        c: Circuit, 
+        g: BaseGraph[VT, ET],
         frontier: Dict[int, VT],
         optimize_czs: bool = True
-        ) -> int:
+        ) -> Tuple[int, ExtractionInstruction]:
     """Remove single qubit gates from the frontier and any CZs between the vertices in the frontier
     Returns the number of CZs saved if `optimize_czs` is True; otherwise returns 0"""
     phases = g.phases()
     czs_saved = 0
+    extraction_instructions = ExtractionInstruction()
     outputs = g.outputs()
     for qubit, vertex in frontier.items():  # First removing single qubit gates
         first_output = [neighbor for neighbor in g.neighbors(vertex) if neighbor in outputs][0]
         edge = g.edge(vertex, first_output)
         if g.edge_type(edge) == EdgeType.HADAMARD:
-            c.add_gate("HAD", qubit)
-            g.set_edge_type(edge, EdgeType.SIMPLE)
+            extraction_instructions.gate_list.append(HAD(qubit))
+            extraction_instructions.edge_change.add((edge, EdgeType.SIMPLE))
+            # c.add_gate("HAD", qubit)
+            # g.set_edge_type(edge, EdgeType.SIMPLE)
         if phases[vertex]:
-            c.add_gate("ZPhase", qubit, phases[vertex])
-            g.set_phase(vertex, 0)
+            extraction_instructions.gate_list.append(ZPhase(qubit, phases[vertex]))
+            extraction_instructions.vertex_change.add((vertex, 0))
+            # c.add_gate("ZPhase", qubit, phases[vertex])
+            # g.set_phase(vertex, 0)
 
     # And now on to CZ gates
     cz_mat = Mat2([[0 for i in range(len(outputs))] for j in range(len(outputs))])
@@ -164,29 +647,47 @@ def clean_frontier_for_architecture(
                 qubit_for_neighbor = list(frontier.keys())[list(frontier.values()).index(neighbor)]
                 cz_mat.data[qubit][qubit_for_neighbor] = 1
                 cz_mat.data[qubit_for_neighbor][qubit] = 1
-                g.remove_edge(g.edge(vertex, neighbor))
+                extraction_instructions.edge_removal.add(g.edge(vertex, neighbor))
+                # g.remove_edge(g.edge(vertex, neighbor))
 
     if optimize_czs:
         overlap_data = max_overlap(cz_mat)
         while len(overlap_data[1]) > 2:  # there are enough common qubits to be worth optimizing
             i, j = overlap_data[0][0], overlap_data[0][1]
             czs_saved += len(overlap_data[1]) - 2
-            c.add_gate("CNOT", i, j)
+            # c.add_gate("CNOT", i, j)
+            extraction_instructions.gate_list.append(CNOT(i,j))
             for qb in overlap_data[1]:
-                c.add_gate("CZ", j, qb)
+                # c.add_gate("CZ", j, qb)
+                extraction_instructions.gate_list.append(CZ(j, qb))
                 cz_mat.data[i][qb] = 0
                 cz_mat.data[j][qb] = 0
                 cz_mat.data[qb][i] = 0
                 cz_mat.data[qb][j] = 0
-            c.add_gate("CNOT", i, j)
+            # c.add_gate("CNOT", i, j)
+            extraction_instructions.gate_list.append(CNOT(i,j))
             overlap_data = max_overlap(cz_mat)
 
     for i in range(len(outputs)):
         for j in range(i + 1, len(outputs)):
             if cz_mat.data[i][j] == 1:
-                c.add_gate("CZ", i, j)
+                # c.add_gate("CZ", i, j)
+                extraction_instructions.gate_list.append(CZ(i, j))
 
-    return czs_saved
+    return czs_saved, extraction_instructions
+
+
+def apply_gates_to_circuit_and_graph(g: BaseGraph[VT, ET], c: Circuit, extraction_instructions: ExtractionInstruction):
+    """Apply the gates and other changes in the extraction instructions to the circuit and graph"""
+    for gate in extraction_instructions.gate_list:
+        c.add_gate(gate)
+    for edge, edge_type in extraction_instructions.edge_change:
+        g.set_edge_type(edge, edge_type)
+    for vertex, phase in extraction_instructions.vertex_change:
+        g.set_phase(vertex, phase)
+    for edge in extraction_instructions.edge_removal:
+        g.remove_edge(edge)
+
 
 def neighbors_of_frontier_for_architecture(
         g: BaseGraph[VT, ET], 
@@ -424,18 +925,27 @@ def mcp_aware_extract(
         if not neighbor in g.outputs():
             g.remove_edge(g.edge(input,neighbor))
 
+    shuttle_list = []
     #iterative process
     while True: 
         #CZ extraction + MCP extraction
-        cz_gates = extract_czs(g, frontier, c, cz_optimize)
-        mcp_gates = extract_mcp(g, frontier, c, allow_insertions)
+        cz_gates = extract_czs(g, frontier, c, architecture_copy, cz_optimize)
+        mcp_gates = extract_mcp(g, frontier, c, architecture_copy, allow_insertions)
         #Phase + Hadamard extraction
         rz_gates = extract_rzs(g, frontier, c)
         # If we cannot proceed with H,RZ,CZ,MCP gate extractions remove Hadamard Wires via CNOT row additions using gaussian elimination
         if frontier and not (rz_gates or mcp_gates or cz_gates):
             frontier_neighbors = get_frontier_neighbors(g, frontier)
 
-            cnots = get_cnot_row_operations(g, frontier, frontier_neighbors, architecture_copy)
+            cnots, shuttle_gate = get_cnot_row_operations(g, frontier, frontier_neighbors, architecture_copy)
+
+            if shuttle_gate:
+                shuttle_list.append(shuttle_gate)
+                c.add_gate(shuttle_gate)
+
+                temp = frontier[shuttle_gate.control]
+                frontier[shuttle_gate.control] = frontier[shuttle_gate.target]
+                frontier[shuttle_gate.target] = temp
 
             # If there is no row with a single 1 there has to be a YZ measured spider in frontier neighbors which we can eliminate
             # Note that this will only be called if allow_insertions=False, because otherwise each phase gadget gets extracted as (M)CP
@@ -486,7 +996,7 @@ def get_cnot_row_operations(
         frontier: Dict[int, VT], 
         frontier_neighbors: Set[VT],
         architecture: Architecture = None        
-        ) -> list | List[CNOT]:
+        ) -> Tuple[List[CNOT], Optional[SHUTTLE]]:
     """ Compute row echelon form of adjacency matrix and save row operations as CNOTs 
      -> because of gflow the resulting matrix has a row with only a single 1"""
     frontier_with_removed = {i: -1 for i in range(len(g.outputs()))}
@@ -499,19 +1009,17 @@ def get_cnot_row_operations(
     if architecture:
         init_cnots, rank = gauss(architecture=architecture, matrix=m2, mode=elim_mode, full_reduce=True)
         init_cnots = filter_duplicate_cnots(init_cnots)
-        for cnot in init_cnots:
-            temp = cnot.control
-            cnot.control = cnot.target
-            cnot.target = temp
+        init_cnots = [CNOT(cnot.target, cnot.control) for cnot in init_cnots]
     else:
         cnot_maker = CNOTMaker()
         m2.gauss(x=cnot_maker, full_reduce=True)
         init_cnots = cnot_maker.cnots
 
     if not any([sum(row) == 1 for row in m2.data]):
-        return []
+        return [], None
     
-    greedy_operations = greedy_reduction(m)
+    greedy_operations = greedy_reduction_with_architecture(m, architecture)
+    # greedy_operations = None
 
     if not greedy_operations:
         neighbors = list(frontier_neighbors)
@@ -524,21 +1032,25 @@ def get_cnot_row_operations(
         if architecture:
             cnots, rank = gauss(architecture=architecture, matrix=m2, mode=elim_mode, full_reduce=True)
             cnots = filter_duplicate_cnots(cnots)
-            for cnot in cnots:
-                temp = cnot.control
-                cnot.control = cnot.target
-                cnot.target = temp
+            cnots = [CNOT(cnot.target, cnot.control) for cnot in cnots]
 
         else:
             cnots = m2.to_cnots(optimize=True)
     else:
-        cnots = [CNOT(target, control) for control, target in greedy_operations]
+        cnots, shuttle = get_best_cnot_configuration(greedy_operations, architecture)
+        cnots = filter_duplicate_cnots(cnots)
+        # cnots = [[CNOT(cnot.target, cnot.control) for cnot in cnot_list] for cnot_list in cnots]
+        cnots = [CNOT(cnot.target, cnot.control) for cnot in cnots]
     
     if not cnots:
         #to_cnots may return an empty list because the blocksize only goes to len(rows)
         cnots = init_cnots
+
+    if shuttle: print(f"        Shuttle with {shuttle}")
+    if not greedy_operations: print(f"      Gaussian elimination with {[CNOT(cnot.target, cnot.control) for cnot in cnots]} CNOTs")
+    else: print(f"      Greedy elimination with {[CNOT(cnot.target, cnot.control) for cnot in cnots]} CNOTs")
     
-    return cnots
+    return cnots, shuttle
 
 def get_frontier_neighbors(g: BaseGraph, frontier: Dict[int, VT]):
     """Given a graph and a frontier set, returns all (non-output) neighbors of the frontier as a set"""
@@ -682,7 +1194,7 @@ def construct_maximal_mcp(g: BaseGraph[VT, ET], frontier: Dict[int,VT]):
     return complete_mcp_structure(g, gadget_dict[max_degree][0], gadget_dict)
 
 
-def extract_mcp(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, allow_insertions: bool = False): 
+def extract_mcp(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, architecture:Architecture, allow_insertions: bool = False): 
     """extracts a single (multi or normal) controlled phase gate from the diagram"""
     if allow_insertions:
         mcp = construct_maximal_mcp(g, frontier)
@@ -717,6 +1229,9 @@ def extract_mcp(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, 
         if mcp_phase != 0:
             qubits = [qubit for qubit, vertex in frontier.items() if vertex in mcp[max_degree][2]]
             gate = MCP(qubits[:-1],qubits[-1],mcp_phase) #target qubit is the last one, but doesn't matter since mcps are symmetric
+            # rerouted_gates = build_connection_from_architecture(architecture, gate)
+            # for rerouted_gate in rerouted_gates:
+            #     circuit.add_gate(rerouted_gate)
             circuit.add_gate(gate)
         return True
     else:
@@ -738,7 +1253,7 @@ def init_frontier(g: BaseGraph[VT, ET], circuit: Circuit) -> Dict[int,VT]:
     
     return frontier
 
-def extract_czs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, optimize: bool = False):
+def extract_czs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, architecture:Architecture, optimize: bool = False):
     """Extracts connected frontier spiders as controlled Z gates and updates the diagram"""
     if optimize:
         optimize_czs_in_frontier(g, frontier)
@@ -747,6 +1262,9 @@ def extract_czs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, 
         for w in set(g.neighbors(v)).intersection(set(frontier.values())):
             g.remove_edge(g.edge(v,w))
             gate = CZ(qubit, list(frontier.keys())[list(frontier.values()).index(w)])
+            # rerouted_gates = build_connection_from_architecture(architecture, gate)
+            # for rerouted_gate in rerouted_gates:
+            #     circuit.add_gate(rerouted_gate)
             circuit.add_gate(gate)
             change = True
     return change
@@ -798,26 +1316,30 @@ def extract_cnots(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit
         control_qubit = cnot.control
         target_qubit = cnot.target
         # CNOT = H+CZ+H
-        circuit.add_gate("HAD",target_qubit)
-        circuit.add_gate("CZ", control_qubit, target_qubit)
-        circuit.add_gate("HAD",target_qubit)
+        # circuit.add_gate("HAD",target_qubit)
+        # circuit.add_gate("CZ", control_qubit, target_qubit)
+        # circuit.add_gate("HAD",target_qubit)
+        circuit.add_gate(cnot)
 
         # Add or remove Hadamard wires in diagram according to CNOT addition
-        ftarg = frontier[control_qubit]
-        fcont = frontier[target_qubit]
-        for v in g.neighbors(fcont):
-            if g.type(v) == VertexType.BOUNDARY:
-                # special case: neighbor of "control" spider is an input, therefore we need to insert a spider between input and control spider
-                vnew = insert_identity(g, fcont, v)
-                break
-    
-        for v in g.neighbors(fcont):
-            # remove wire
-            if g.connected(ftarg,v):
-                g.remove_edge(g.edge(ftarg,v))
-            # add wire
-            else:
-                g.add_edge(g.edge(ftarg,v), EdgeType.HADAMARD)
+        try:
+            ftarg = frontier[control_qubit]
+            fcont = frontier[target_qubit]
+            for v in g.neighbors(fcont):
+                if g.type(v) == VertexType.BOUNDARY:
+                    # special case: neighbor of "control" spider is an input, therefore we need to insert a spider between input and control spider
+                    vnew = insert_identity(g, fcont, v)
+                    break
+        
+            for v in g.neighbors(fcont):
+                # remove wire
+                if g.connected(ftarg,v):
+                    g.remove_edge(g.edge(ftarg,v))
+                # add wire
+                else:
+                    g.add_edge(g.edge(ftarg,v), EdgeType.HADAMARD)
+        except:
+            pass
 
     return True
 
@@ -904,44 +1426,15 @@ def insert_identity(g: BaseGraph[VT,ET], v1: VT, v2: VT) -> VT:
         g.add_edge((vmid,v2), EdgeType.HADAMARD)
     return vmid
 
-class MCP(Gate):
-    name = 'MCP'
-    qasm_name = 'mcp'
-    print_phase = True
-    def __init__(self, controls: List[int], target: int, phase: FractionLike) -> None:
-        self.target = target
-        self.controls = controls
-        self.phase = phase
 
-    def to_basic_gates(self):
-        all_qubits = self.controls+[self.target]
-        gates = []
-        odd_phase = self.phase/(2**len(self.controls))
-        even_phase = -odd_phase
-        for degree in range(2,len(all_qubits)+1):
-            combinations = list(itertools.combinations(all_qubits, degree))
-            for combination in combinations:
-                for idx in range(0,len(combination)-1):
-                    gates.append(CNOT(combination[idx],combination[idx+1]))
-                gates.append(ZPhase(combination[-1], odd_phase if degree % 2 == 1 else even_phase))
-                for idx in range(len(combination)-2,-1,-1):
-                    gates.append(CNOT(combination[idx],combination[idx+1]))
-        for qubit in all_qubits:
-            gates.append(ZPhase(qubit, odd_phase))
-        return gates                
 
-    def to_graph(self, g, q_mapper, c_mapper):
-        for gate in self.to_basic_gates():
-            gate.to_graph(g, q_mapper, c_mapper)
-    
-    def to_qasm(self) -> str:
-        phase = "({}*pi)".format(float(self.phase))
-        if len(self.controls) == 1:
-            return "cp"+phase+" q["+str(self.controls[0])+"], q["+str(self.target)+"];"
-        else:
-            name = "mcp"+str(len(self.controls)+1)
-            control_string = "".join(["q["+str(control)+"], " for control in self.controls])
-            return name+phase+" "+control_string+" q["+str(self.target)+"];"
+
+
+
+
+
+
+
 
 
 def convert_to_qiskit(c: Circuit):

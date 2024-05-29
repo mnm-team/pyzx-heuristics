@@ -50,6 +50,8 @@ def connectivity_from_biadj(
     by the biadjacency matrix ``m``. The edges will be of type ``edgetype``."""
     for i in range(len(right)):
         for j in range(len(left)):
+            if right[i] == -1 or left[j] == -1:
+                continue
             if m.data[i][j] and not g.connected(right[i],left[j]):
                 g.add_edge(g.edge(right[i],left[j]),edgetype)
             elif not m.data[i][j] and g.connected(right[i],left[j]):
