@@ -1,8 +1,10 @@
 import itertools
 import math
 
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 from fractions import Fraction
+
+import numpy as np
 
 
 from pyzx.circuit import Circuit
@@ -123,6 +125,29 @@ def find_minimal_sums_with_architecture(m: Mat2, architecture:Architecture, resu
         combs = combs2
 
 
+def get_original_cnot(rerouted_cnots: list[CNOT]) -> CNOT:
+
+    if len(rerouted_cnots) == 1:
+        return rerouted_cnots[0]
+
+    min_control = min(rerouted_cnots, key=lambda x: x.control).control
+    min_target = min(rerouted_cnots, key=lambda x: x.target).target
+
+    max_control = max(rerouted_cnots, key=lambda x: x.control).control
+    max_target = max(rerouted_cnots, key=lambda x: x.target).target
+
+    if min_control < min_target:
+        return CNOT(min_control, max_target)
+    else:
+        return CNOT(max_control, min_target)
+    
+
+def get_basic_cnots(rerouted_cnot_list: list[list[CNOT]]) -> List[CNOT]:
+    basic_cnots: List[CNOT] = []
+    for cnots in rerouted_cnot_list:
+
+        basic_cnots.append(get_original_cnot(cnots))
+    return basic_cnots
 
 
 def greedy_reduction_with_architecture(m: Mat2, architecture: Architecture) -> Optional[List[List[List[CNOT]]]]:
@@ -213,26 +238,41 @@ def greedy_reduction_with_architecture2(m: Mat2, architecture: Architecture) -> 
 
 
 
+def gate_mapper(circuit: Circuit | list[Circuit], num_qubits:int) -> Tuple[Architecture, int]:   
+    m = np.zeros((num_qubits, num_qubits), dtype=int)
+    
+    for i in range(num_qubits):
+        if i > 0:
+            m[i, i-1] = 1
+        if i < num_qubits - 1:
+            m[i, i+1] = 1
+    
+    return Architecture("new_coupling", coupling_matrix=m), 0
+
+def get_circuit_from_mapper() -> Circuit:
+    c = Circuit(5)
+    return c
 
 
 
-def get_best_cnot_configuration(cnots_list: List[List[List[CNOT]]], architecture: Architecture) -> Tuple[List[CNOT], Optional[SHUTTLE]]:
+
+def get_best_cnot_configuration(cnots_list: List[List[CNOT]], architecture: Architecture) -> List[CNOT]:
     """Given a list of lists of CNOTs, returns the list with the fewest CNOTs"""
     if not cnots_list:
         return []
     
-    best_result = (None, None, math.inf)
+    best_result = (None, math.inf)
     
     for cnots in cnots_list:
-        if any(len(rerouted_cnots) > 1 for rerouted_cnots in cnots):
-            shuttle_gate, new_cnots, new_cost = check_shuttling(cnots, architecture)
-            if new_cost < best_result[2]:
-                best_result = (new_cnots, shuttle_gate, new_cost)
-        else:
-            if len(cnots) < best_result[2]:
-                best_result = (cnots, None, sum(len(rerouted_cnots) for rerouted_cnots in cnots))
+        # if any(len(rerouted_cnots) > 1 for rerouted_cnots in cnots):
+        #     shuttle_gate, new_cnots, new_cost = check_shuttling(cnots, architecture)
+        #     if new_cost < best_result[2]:
+        #         best_result = (new_cnots, shuttle_gate, new_cost)
+        # else:
+        if len(cnots) < best_result[1]:
+            best_result = (cnots, len(cnots))
 
-    return [item for sublist in best_result[0] for item in sublist], best_result[1]
+    return best_result[0]
 
 
 def check_shuttling(cnots_list: List[List[CNOT]], architecture: Architecture) -> Tuple[Optional[SHUTTLE], List[List[CNOT]], int]:
@@ -261,23 +301,7 @@ def check_shuttling(cnots_list: List[List[CNOT]], architecture: Architecture) ->
 
     max_rerouting_index = max(enumerate(cnots_list), key=lambda x: len(x[1]))[0]
 
-    basic_cnots: List[CNOT] = []
-    for cnots in cnots_list:
-
-        if len(cnots) == 1:
-            basic_cnots.append(cnots[0])
-            continue
-
-        min_control = min(cnots, key=lambda x: x.control).control
-        min_target = min(cnots, key=lambda x: x.target).target
-
-        max_control = max(cnots, key=lambda x: x.control).control
-        max_target = max(cnots, key=lambda x: x.target).target
-
-        if min_control < min_target:
-            basic_cnots.append(CNOT(min_control, max_target))
-        else:
-            basic_cnots.append(CNOT(max_control, min_target))
+    basic_cnots: List[CNOT] = get_basic_cnots(cnots_list)
 
     biggest_cnot = basic_cnots[max_rerouting_index]
 
@@ -437,7 +461,8 @@ def rearrange_columns_for_architecture(m: Mat2, architecture: Architecture, swap
 
 def neighbors_of_frontier(
         g: BaseGraph[VT, ET], 
-        frontier: Dict[int, VT]
+        frontier: Dict[int, VT],
+        inverse: bool = False
         ) -> Set[VT]:
     """Returns the set of neighbors of the frontier. When collecting the vertices, it also checks if the vertices
     of the frontier are connected correctly to the inputs.
@@ -447,32 +472,42 @@ def neighbors_of_frontier(
     qs = g.qubits()
     rs = g.rows()
     neighbor_set = set()
-    inputs = g.inputs()
-    outputs = g.outputs()
+
+    start = g.inputs() if not inverse else g.outputs()
+    end = g.outputs() if not inverse else g.inputs()
+
     for qubit, vertex in frontier.copy().items():
-        non_output_neighbors = [neighbor for neighbor in g.neighbors(vertex) if neighbor not in outputs]
-        if any(neighbor in inputs for neighbor in non_output_neighbors):  # frontier vertex v is connected to an input
-            if len(non_output_neighbors) == 1:  # Only connected to input, remove from frontier
+        non_start_neighbors = [neighbor for neighbor in g.neighbors(vertex) if neighbor not in start]
+        if any(neighbor in end for neighbor in non_start_neighbors):  # frontier vertex v is connected to an input
+            if len(non_start_neighbors) == 1:  # Only connected to input, remove from frontier
                 del frontier[qubit]
                 continue
             # We disconnect v from the input b via a new spider
-            first_input = [neighbor for neighbor in non_output_neighbors if neighbor in inputs][0]
-            q = qs[first_input]
-            r = rs[first_input]
+            first_end = [neighbor for neighbor in non_start_neighbors if neighbor in end][0]
+            q = qs[first_end]
+            r = rs[first_end]
             new_vertex = g.add_vertex(VertexType.Z, q, r + 1)
-            edge = g.edge(vertex, first_input)
+            edge = g.edge(vertex, first_end)
             edge_type = g.edge_type(edge)
 
             g.remove_edge(edge)
             g.add_edge(g.edge(vertex, new_vertex), EdgeType.HADAMARD)
-            g.add_edge(g.edge(new_vertex, first_input), toggle_edge(edge_type))
-            non_output_neighbors.remove(first_input)
-            non_output_neighbors.append(new_vertex)
-        neighbor_set.update(non_output_neighbors)
+            g.add_edge(g.edge(new_vertex, first_end), toggle_edge(edge_type))
+            non_start_neighbors.remove(first_end)
+            non_start_neighbors.append(new_vertex)
+        neighbor_set.update(non_start_neighbors)
     return neighbor_set
 
+def get_frontier_neighbors(g: BaseGraph, frontier: Dict[int, VT]):
+    """Given a graph and a frontier set, returns all (non-output) neighbors of the frontier as a set"""
+    res = set()
+    for v in frontier.values():
+        res.update(set(g.neighbors(v)))
+    return res.difference(set(g.outputs()))
 
-def remove_gadget(
+
+
+def remove_gadget2(
         g: BaseGraph[VT, ET], 
         frontier: Dict[int, VT],
         neighbor_set: Set[VT], 
@@ -499,16 +534,44 @@ def remove_gadget(
     return removed_gadget
 
 
+def remove_gadget(
+        g: BaseGraph[VT, ET], 
+        frontier: Dict[int, VT],
+        inverse: bool = False
+        ) -> bool:
+    """Removes a gadget that is attached to a frontier vertex. Returns True if such gadget was found, False otherwise"""
+    gadget_set = get_frontier_gadgets(g, frontier)
+    removed_gadget = False
+    start = g.inputs() if not inverse else g.outputs()
+    
+    for root, _ in gadget_set:
+        first_frontier_neighbor = [o for o in g.neighbors(root) if o in frontier.values()][0]
+        if phase_is_true_clifford(g.phase(root)):
+            apply_rule(g, lcomp_with_boundaries, [(root, list(g.neighbors(root)))])  # type: ignore
+        else:
+            qubit_for_vertex = list(frontier.keys())[list(frontier.values()).index(first_frontier_neighbor)]
+            apply_rule(g, pivot, [(root, first_frontier_neighbor, [], [o for o in g.neighbors(first_frontier_neighbor) if o in start])])  # type: ignore
+            
+            frontier[qubit_for_vertex] = root
+
+        removed_gadget = True
+        break
+    return removed_gadget
+
+
 def apply_cnots(g: BaseGraph[VT, ET], 
-                                  c: Circuit, 
-                                  frontier: Dict[int, VT], 
-                                  cnots: List[CNOT], 
-                                  m: Mat2, 
-                                  neighbors: List[VT]
-                                  ) -> int:
+                c: Circuit | None, 
+                frontier: Dict[int, VT], 
+                cnots: List[CNOT], 
+                m: Mat2, 
+                neighbors: List[VT],
+                inverse: bool = False
+                ) -> Tuple[Circuit, int]:
     """Adds the list of CNOTs to the circuit, modifying the graph, frontier, and qubit map as needed.
     Returns the number of vertices that end up being extracted"""
-    frontier_with_removed = {i: -1 for i in range(len(g.outputs()))}
+    start = g.inputs() if not inverse else g.outputs()
+
+    frontier_with_removed = {i: -1 for i in range(len(start))}
     frontier_with_removed.update(frontier)
     neighbors_copy = neighbors.copy()
     for _ in range(len(frontier) - len(neighbors)):
@@ -533,21 +596,35 @@ def apply_cnots(g: BaseGraph[VT, ET],
     if not good_verts:
         raise Exception("No extractable vertex found. Something went wrong")
     hads = []
-    outputs = g.outputs()
+
     for qubit, (v, w) in good_verts.items():  # Update frontier vertices
         hads.append(qubit)
         # c.add_gate("HAD",qubit_map[v])
-        b = [o for o in g.neighbors(v) if o in outputs][0]
+        b = [o for o in g.neighbors(v) if o in start][0]
         g.remove_vertex(v)
         g.add_edge(g.edge(w, b))
         frontier[qubit] = w
 
+    if c is None:
+        c_extracted_gates = Circuit(len(frontier))
+        for cnot in cnots:
+            c_extracted_gates.add_gate(cnot)
+            # c_extracted_gates.add_gate("HAD",cnot.target)
+            # c_extracted_gates.add_gate("CZ", cnot.control, cnot.target)
+            # c_extracted_gates.add_gate("HAD",cnot.target)
+        for h in hads:
+            c_extracted_gates.add_gate("HAD", h)
+        return c_extracted_gates, len(good_verts)
+
     for cnot in cnots:
         c.add_gate(cnot)
+        # c.add_gate("HAD",cnot.target)
+        # c.add_gate("CZ", cnot.control, cnot.target)
+        # c.add_gate("HAD",cnot.target)
     for h in hads:
         c.add_gate("HAD", h)
 
-    return len(good_verts)
+    return c, len(good_verts)
 
 
 
@@ -574,35 +651,36 @@ def eliminate_unary_phase_gadgets(g: BaseGraph, frontier: Dict[int, VT]):
             break
 
 
+def get_cnot_row_operations2(
+        g: BaseGraph, 
+        frontier: Dict[int, VT], 
+        frontier_neighbors: Set[VT],
+        architecture: Architecture = None        
+        ) -> List[CNOT]:
+    """ Compute row echelon form of adjacency matrix and save row operations as CNOTs 
+     -> because of gflow the resulting matrix has a row with only a single 1"""
+    
+    cnots = get_all_cnot_operations(g, frontier, frontier_neighbors, architecture)
+
+    cnots = get_best_cnot_configuration(cnots, architecture)
+    
+    return cnots
+
 def get_cnot_row_operations(
         g: BaseGraph, 
         frontier: Dict[int, VT], 
         frontier_neighbors: Set[VT],
         architecture: Architecture = None        
-        ) -> Tuple[List[CNOT], Optional[SHUTTLE]]:
+        ) -> List[CNOT]:
     """ Compute row echelon form of adjacency matrix and save row operations as CNOTs 
      -> because of gflow the resulting matrix has a row with only a single 1"""
     frontier_with_removed = {i: -1 for i in range(len(g.outputs()))}
     frontier_with_removed.update(frontier)
     m_frontier = bi_adj(g, list(frontier_neighbors), frontier.values())
     m: Mat2 = bi_adj(g, list(frontier_neighbors), frontier_with_removed.values())
-    m2: Mat2 = m.copy()
     elim_mode = ElimMode.STEINER_MODE
-
-    if architecture:
-        init_cnots, rank = gauss(architecture=architecture, matrix=m2, mode=elim_mode, full_reduce=True)
-        init_cnots = filter_duplicate_cnots(init_cnots)
-        init_cnots = [CNOT(cnot.target, cnot.control) for cnot in init_cnots]
-    else:
-        cnot_maker = CNOTMaker()
-        m2.gauss(x=cnot_maker, full_reduce=True)
-        init_cnots = cnot_maker.cnots
-
-    if not any([sum(row) == 1 for row in m2.data]):
-        return [], None
     
     greedy_operations = greedy_reduction_with_architecture(m, architecture)
-    # greedy_operations = None
 
     if not greedy_operations:
         neighbors = list(frontier_neighbors)
@@ -619,21 +697,108 @@ def get_cnot_row_operations(
 
         else:
             cnots = m2.to_cnots(optimize=True)
-    else:
-        cnots, shuttle = get_best_cnot_configuration(greedy_operations, architecture)
-        cnots = filter_duplicate_cnots(cnots)
-        # cnots = [[CNOT(cnot.target, cnot.control) for cnot in cnot_list] for cnot_list in cnots]
-        cnots = [CNOT(cnot.target, cnot.control) for cnot in cnots]
-    
-    if not cnots:
-        #to_cnots may return an empty list because the blocksize only goes to len(rows)
-        cnots = init_cnots
 
-    if shuttle: print(f"        Shuttle with {shuttle}")
+        if not any([sum(row) == 1 for row in m2.data]):
+            return None
+    else:
+        cnot_list_greedy: list[list[CNOT]] = []
+        for cnot_list in greedy_operations:
+            rerouted_cnots: list[CNOT] = []
+            for cnots in cnot_list:
+                rerouted_cnots.extend(cnots)
+            cnot_list_greedy.append(rerouted_cnots)
+
+        cnots = get_best_cnot_configuration(cnot_list_greedy, architecture)
+        cnots = filter_duplicate_cnots(cnots)
+        # cnots = [CNOT(cnot.target, cnot.control) for cnot in cnots]
+
     if not greedy_operations: print(f"      Gaussian elimination with {[CNOT(cnot.target, cnot.control) for cnot in cnots]} CNOTs")
     else: print(f"      Greedy elimination with {[CNOT(cnot.target, cnot.control) for cnot in cnots]} CNOTs")
     
-    return cnots, shuttle
+    return cnots
+
+
+def get_all_cnot_operations(
+        g: BaseGraph, 
+        frontier: Dict[int, VT], 
+        frontier_neighbors: Set[VT],
+        architecture: Architecture = None        
+        ) -> list[List[CNOT]]:
+    """ Compute row echelon form of adjacency matrix and save row operations as CNOTs 
+     -> because of gflow the resulting matrix has a row with only a single 1"""
+    frontier_with_removed = {i: -1 for i in range(len(g.outputs()))}
+    frontier_with_removed.update(frontier)
+    m_frontier = bi_adj(g, list(frontier_neighbors), frontier.values())
+    m: Mat2 = bi_adj(g, list(frontier_neighbors), frontier_with_removed.values())
+    m2: Mat2 = m.copy()
+    elim_mode = ElimMode.STEINER_MODE
+
+    greedy_operations = greedy_reduction_with_architecture(m, architecture)
+
+    if not greedy_operations:
+        neighbors = list(frontier_neighbors)
+        perm = column_optimal_swap(m)
+        perm = {v: k for k, v in perm.items()}
+        neighbors2 = [neighbors[perm[i]] for i in range(len(neighbors))]
+
+        m2 = bi_adj(g, neighbors2, frontier_with_removed.values())
+
+        if architecture:
+            m2_no_arch = m2.copy()
+            cnot_list_arch, rank = gauss(architecture=architecture, matrix=m2, mode=elim_mode, full_reduce=True)
+            cnot_list_arch = filter_duplicate_cnots(cnot_list_arch)
+            cnots_arch = [CNOT(cnot.target, cnot.control) for cnot in cnot_list_arch]
+
+            cnot_list_no_arch = m2_no_arch.to_cnots(optimize=True)
+            cnot_list_no_arch = filter_duplicate_cnots(cnot_list_no_arch)
+
+            cnots = [cnots_arch, cnot_list_no_arch]
+            
+        else:
+            cnots = [m2.to_cnots(optimize=True)]
+
+        if not any([sum(row) == 1 for row in m2.data]):
+            return [None]
+    else:
+        cnot_list_greedy_basic = [get_basic_cnots(cnots) for cnots in greedy_operations]
+        cnot_list_greedy: list[list[CNOT]] = []
+        for cnot_list in greedy_operations:
+            rerouted_cnots: list[CNOT] = []
+            for cnots in cnot_list:
+                rerouted_cnots.extend(cnots)
+            cnot_list_greedy.append(filter_duplicate_cnots(rerouted_cnots))
+
+        cnots = cnot_list_greedy + cnot_list_greedy_basic
+
+    for cnot_list in cnots:
+        if not greedy_operations: print(f"      Gaussian elimination with {cnot_list} CNOTs")
+        else: print(f"      Greedy elimination with {cnot_list} CNOTs")
+    
+    return cnots
+
+
+
+def get_all_gadgets(g: BaseGraph[VT, ET]) -> Dict[VT, VT]:
+    """Returns all phase gadgets in the graph as a dictionary where the key is the root spider and the value is the top spider"""
+    gadgets = dict()
+    for v in g.vertices():
+        if g.vertex_degree(v) == 1 and v not in g.inputs() and v not in g.outputs():
+            n = list(g.neighbors(v))[0]
+            gadgets[n] = v
+    return gadgets
+
+
+def get_frontier_gadgets(g: BaseGraph, frontier: Dict[int, VT]):
+    """Given a graph and a frontier set, returns all phase gadget neighbors of the frontier as a set of tuples (root,top) 
+    where root is the (phaseless) root spider, and top the 1-ary spider with phase connected to root"""
+    res = set()
+    for v in frontier.values():
+        for n in g.neighbors(v):
+            for potential_top in g.neighbors(n):
+                if g.vertex_degree(potential_top) == 1 and potential_top not in g.inputs() and potential_top not in g.outputs():
+                    res.add((n,potential_top))
+
+    return res
 
 
 def get_exclusive_frontier_gadgets(g: BaseGraph, frontier: Dict[int, VT]):
@@ -662,9 +827,6 @@ def get_frontier_gadget_dict(g: BaseGraph[VT,ET], frontier: Dict[int, VT]):
         gadget_dict.setdefault(len(neighbors_in_frontier),[]).append((root,top,neighbors_in_frontier))
 
     return gadget_dict
-
-
-
 
 
 
@@ -697,10 +859,12 @@ def extract_czs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, 
         for w in set(g.neighbors(v)).intersection(set(frontier.values())):
             g.remove_edge(g.edge(v,w))
             gate = CZ(qubit, list(frontier.keys())[list(frontier.values()).index(w)])
-            # rerouted_gates = build_connection_from_architecture(architecture, gate)
-            # for rerouted_gate in rerouted_gates:
-            #     circuit.add_gate(rerouted_gate)
-            circuit.add_gate(gate)
+            if architecture:
+                rerouted_gates = build_connection_from_architecture(architecture, gate)
+                for rerouted_gate in rerouted_gates:
+                    circuit.add_gate(rerouted_gate)
+            else:
+                circuit.add_gate(gate)
             change = True
     return change
 
@@ -708,17 +872,9 @@ def extract_czs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, 
 def extract_rzs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, inverse: bool = False):
     """Extracts phases of frontier spiders as ZPhase gates and updates the diagram"""
     start = list(g.inputs()) if not inverse else list(g.outputs())
-    change = False
+    phase_change = False
+    
     for qubit in list(frontier.keys()):
-        v = frontier[qubit]
-        
-        first_start = [neighbor for neighbor in g.neighbors(v) if neighbor in start]
-        if len(first_start) > 0:
-            edge = g.edge(v, first_start[0])
-            if g.edge_type(edge) == EdgeType.HADAMARD:
-                circuit.add_gate(HAD(qubit))
-                g.set_edge_type(edge, EdgeType.SIMPLE)
-
         while True:
             boundary = False
             v = frontier[qubit]
@@ -727,10 +883,10 @@ def extract_rzs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, 
                 g.set_phase(v,0)
                 gate = ZPhase(qubit, phase)
             else:
-                neighbors = list(g.neighbors(v))
+                neighbors = [neighbor for neighbor in g.neighbors(v) if neighbor not in start]
                 if len(neighbors) != 1:
                     break
-                
+
                 if g.type(neighbors[0]) == VertexType.BOUNDARY:
                     boundary = True
                     if g.edge_type(g.edge(v,neighbors[0])) == EdgeType.HADAMARD:
@@ -738,26 +894,33 @@ def extract_rzs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, 
                     else:
                         gate = None
 
+                                    
                     g.add_edge(g.edge(start[qubit],neighbors[0]))
                     del frontier[qubit]
                 else:
                     frontier[qubit] = neighbors[0]
                     gate = HAD(qubit)
-                
+
+                    first_start = [neighbor for neighbor in g.neighbors(v) if neighbor in start]
+                    g.add_edge(g.edge(first_start[0], neighbors[0]))
+                    
+                    print("Simple vertex")
+                                
                 g.remove_vertex(v)
+
             
             if gate:
                 circuit.add_gate(gate)
-                change = True
+                phase_change = True
 
             if boundary:
                 break
 
-    return change
-
+    return phase_change
 
 def extract_cnots(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, cnots: List[CNOT]):
     """Extracts CNOT gates resulting from gaussian elimination to circuit and adds the Hadamard wires of the corresponding frontier vertices"""
+      
     for cnot in cnots:
         # Add CNOT to circuit
         control_qubit = cnot.control
@@ -769,26 +932,53 @@ def extract_cnots(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit
         circuit.add_gate(cnot)
 
         # Add or remove Hadamard wires in diagram according to CNOT addition
-        try:
-            ftarg = frontier[control_qubit]
-            fcont = frontier[target_qubit]
-            for v in g.neighbors(fcont):
-                if g.type(v) == VertexType.BOUNDARY:
-                    # special case: neighbor of "control" spider is an input, therefore we need to insert a spider between input and control spider
-                    vnew = insert_identity(g, fcont, v)
-                    break
-        
-            for v in g.neighbors(fcont):
-                # remove wire
-                if g.connected(ftarg,v):
-                    g.remove_edge(g.edge(ftarg,v))
-                # add wire
-                else:
-                    g.add_edge(g.edge(ftarg,v), EdgeType.HADAMARD)
-        except:
-            pass
+
+        ftarg = frontier[control_qubit]
+        fcont = frontier[target_qubit]
+
+        neighbors_without_start = [neighbor for neighbor in g.neighbors(fcont) if neighbor not in g.inputs()]
+        for v in neighbors_without_start:
+            if g.type(v) == VertexType.BOUNDARY:
+                # special case: neighbor of "control" spider is an input, therefore we need to insert a spider between input and control spider
+                vnew = insert_identity(g, fcont, v)
+                break
+    
+        for v in neighbors_without_start:
+            # remove wire
+            if g.connected(ftarg,v):
+                g.remove_edge(g.edge(ftarg,v))
+            # add wire
+            else:
+                g.add_edge(g.edge(ftarg,v), EdgeType.HADAMARD)
+
 
     return True
+
+
+def get_circuits_for_cnots(g, use_gate_mapping: bool, circuit: Circuit, frontier: Dict[VT, int], neighbors:List[VT], m: Mat2, cnots: List[List[CNOT]], cnot_function: Callable):
+    cnot_data = {"circuits": [], "graph": [], "frontier": [], "matrix": [], "neighbors": []}
+    for cnot_list in cnots:
+        if use_gate_mapping:
+            copies = {key: val.copy() for key, val in {"frontier": frontier, "matrix": m, "neighbors": neighbors}.items()}
+            copies["graph"] = g.clone()
+            c, extracted = cnot_function(copies["graph"], None, copies["frontier"], cnot_list, copies["matrix"], copies["neighbors"], inverse=True)
+            cnot_data["circuits"].append(c)
+            for key in copies:
+                cnot_data[key].append(copies[key])
+        else:
+            if len(cnots) > 1:
+                raise ValueError("Multiple CNOTs not supported without gate mapping")
+            circuit, extracted = cnot_function(g, circuit, frontier, cnot_list, m, neighbors, inverse=True)
+
+    if use_gate_mapping:
+        architecture_copy, circuit_index = gate_mapper(cnot_data["circuits"], len(frontier))
+        circuit = Circuit(len(g.outputs()))
+        g = cnot_data["graph"][circuit_index]
+        frontier = cnot_data["frontier"][circuit_index]
+        m = cnot_data["matrix"][circuit_index]
+        neighbors = cnot_data["neighbors"][circuit_index]
+        
+    return g,circuit,frontier,m
 
 
 def optimize_czs_in_frontier(g: BaseGraph, frontier: Dict[int, VT]):

@@ -24,7 +24,7 @@ def insert_identity(g, v1, v2) -> int:
     orig_type = g.edge_type(g.edge(v1, v2))
     if g.connected(v1, v2):
         g.remove_edge(g.edge(v1, v2))
-    vmid = g.add_vertex(VertexType.Z,-1,g.rows()[v1])
+    vmid = g.add_vertex(VertexType.Z, g.qubits()[v1], g.rows()[v1] -1)
     g.add_edge((v1,vmid), EdgeType.HADAMARD)
     if orig_type == EdgeType.HADAMARD:
         g.add_edge((vmid,v2), EdgeType.SIMPLE)

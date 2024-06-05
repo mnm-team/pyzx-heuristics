@@ -496,7 +496,14 @@ def unfuse_to_neighbor(graph, current_vertex, neighbor_vertex, desired_phase):
     tuple: A tuple containing the phaseless spider and the phase spider.
     """
     new_phase = split_phases(graph.phase(current_vertex), desired_phase)
-    phase_spider = graph.add_vertex(VertexType.Z,-2,graph.rows()[current_vertex],new_phase)
+
+    if neighbor_vertex == -1:
+        row = graph.rows()[0] -0.5
+    else:
+        row = graph.rows()[current_vertex]
+
+
+    phase_spider = graph.add_vertex(VertexType.Z,-2,row,new_phase)
     graph.set_phase(current_vertex, desired_phase)
 
     if neighbor_vertex == -1:
