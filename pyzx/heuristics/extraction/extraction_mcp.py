@@ -3,15 +3,17 @@ import itertools
 from typing import Dict, List, Set, Tuple
 from fractions import Fraction
 
+from qiskit import QuantumCircuit
+
 
 from pyzx.circuit import Circuit
-from pyzx.circuit.gates import CNOT, HAD, ZPhase
+from pyzx.circuit.gates import HAD, ZPhase
 from pyzx.extract import graph_to_swaps
 from pyzx.graph.base import ET, VT, BaseGraph
-from pyzx.heuristics.extraction.extraction_base import MCP, bi_adj, complement_neighbors, eliminate_unary_phase_gadgets, extract_cnots, extract_czs, extract_rzs, gate_mapper, get_all_cnot_operations, get_circuit_from_mapper, get_circuits_for_cnots, get_cnot_row_operations, get_frontier_gadget_dict, get_frontier_neighbors, init_frontier, neighbors_of_frontier
+from pyzx.heuristics.extraction.extraction_base import MCP, bi_adj, complement_neighbors, eliminate_unary_phase_gadgets, extract_cnots, extract_czs, extract_rzs, get_all_cnot_operations, get_cnot_row_operations, get_frontier_gadget_dict, init_frontier, neighbors_of_frontier
+from pyzx.heuristics.extraction.mapper import create_mapper, gate_mapper, init_mapper, get_circuit_from_mapper
 from pyzx.heuristics.extraction.rerouting import build_connection_from_architecture
 from pyzx.heuristics.tools import insert_identity
-from pyzx.linalg import Mat2
 from pyzx.routing.architecture import Architecture
 from pyzx.utils import EdgeType, VertexType
 
@@ -33,6 +35,10 @@ def mcp_aware_extract(
     """
     assert(g.num_inputs()==g.num_outputs())
     circuit = Circuit(qubit_amount=g.num_inputs())
+
+    if use_gate_mapping:
+        mapper = create_mapper()
+        init_mapper(mapper, g.num_inputs())
    
     frontier = init_frontier(g, circuit)
 
@@ -52,7 +58,7 @@ def mcp_aware_extract(
 
         if use_gate_mapping and (cz_gates or mcp_gates or rz_gates):           
             # If we have extracted some CZ gates, we need to add them to the circuit
-            architecture_copy, circuit_index = gate_mapper(circuit, len(g.inputs()))
+            architecture_copy, circuit_index = gate_mapper(mapper, circuit)
             circuit = Circuit(len(g.inputs()))
 
         if frontier and not (rz_gates or mcp_gates or cz_gates):
@@ -87,7 +93,7 @@ def mcp_aware_extract(
                         circuit = apply_cnots(g, circuit, frontier, cnot_list, frontier_neighbors)
 
                 if use_gate_mapping:
-                    architecture_copy, circuit_index = gate_mapper(cnot_data["circuits"], len(frontier))
+                    architecture_copy, circuit_index = gate_mapper(mapper, cnot_data["circuits"])
                     circuit = Circuit(len(g.inputs()))
                     g = cnot_data["graphs"][circuit_index]
                     frontier = cnot_data["frontier"][circuit_index]
@@ -97,7 +103,7 @@ def mcp_aware_extract(
         if g.num_vertices() == g.num_inputs() + g.num_outputs():
             try:
                 if use_gate_mapping:
-                    return get_circuit_from_mapper()
+                    return get_circuit_from_mapper(mapper)
                 
                 return circuit + graph_to_swaps(g)
             except:
@@ -292,7 +298,7 @@ def extract_mcp(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit, 
 
 
 
-def eliminate_yz_spider(g: BaseGraph[VT,ET], frontier: Dict[int,VT], frontier_neighbors: Set, circuit: Circuit, inverse: bool = False) -> bool:
+def eliminate_yz_spider(g: BaseGraph[VT,ET], frontier: Dict[int,VT], frontier_neighbors: Set, circuit: Circuit|QuantumCircuit, inverse: bool = False) -> bool:
     """Finds a YZ measured spider which is connected to a spider in frontier and applies a pivot on them. 
     By that, the YZ spider transforms to a XY spider"""
 
@@ -319,8 +325,11 @@ def eliminate_yz_spider(g: BaseGraph[VT,ET], frontier: Dict[int,VT], frontier_ne
                 g.set_phase(n, g.phase(n)+g.phase(candidate))
                 g.remove_vertex(candidate)
 
-                gate = HAD(frontier_vertex_qubit)
-                circuit.add_gate(gate)                
+                if isinstance(circuit, Circuit):
+                    gate = HAD(frontier_vertex_qubit)
+                    circuit.add_gate(gate)    
+                else:
+                    circuit.h(frontier_vertex_qubit)            
 
                 return True
     return False

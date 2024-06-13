@@ -215,13 +215,14 @@ class Architecture():
         Check if the subgraph is connected
         """
         vertices = [self.vertices[i] for i in subgraph_vertices]
+        subgraph_qubits = [self.vertex2qubit(v) for v in vertices]
         
         for start_index in range(len(vertices)):
             for end_index in range(start_index+1, len(vertices)):
                 start = vertices[start_index]
                 end = vertices[end_index]
                 
-                path = self.shortest_path(self.vertex2qubit(start), self.vertex2qubit(end), subgraph_vertices)
+                path = self.shortest_path(self.vertex2qubit(start), self.vertex2qubit(end), subgraph_qubits)
 
                 if path is None:                    
                     return False

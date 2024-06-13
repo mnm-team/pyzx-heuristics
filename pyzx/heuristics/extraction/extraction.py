@@ -1,19 +1,26 @@
+from fractions import Fraction
+from pathlib import Path
 from typing import Dict
+
+from qiskit import QuantumCircuit
 from pyzx.circuit import Circuit
-from pyzx.circuit.gates import CNOT
 from pyzx.extract import graph_to_swaps, max_overlap
 from pyzx.graph.base import ET, VT, BaseGraph
-from pyzx.heuristics.extraction.extraction_base import apply_cnots, bi_adj, extract_czs, extract_rzs, gate_mapper, get_all_cnot_operations, get_all_gadgets, get_circuit_from_mapper, get_cnot_row_operations, init_frontier, neighbors_of_frontier, remove_gadget, remove_gadget2
+from pyzx.heuristics.extraction.extraction_base import apply_cnots, bi_adj, get_all_cnot_operations, get_all_gadgets, get_cnot_row_operations, init_frontier, neighbors_of_frontier, remove_gadget, reorder_frontier
 from pyzx.heuristics.extraction.extraction_mcp import eliminate_yz_spider
+from pyzx.heuristics.extraction.mapper import create_mapper, gate_mapper, get_circuit_from_mapper, init_mapper
 from pyzx.linalg import Mat2
 from pyzx.routing.architecture import Architecture
 from pyzx.simplify import id_simp
 from pyzx.utils import EdgeType
 
 
+from mqt.qmap import HybridSynthesisMapper, NeutralAtomHybridArchitecture, HybridMapperParameters, InitialCoordinateMapping, InitialCircuitMapping
+
+
 
 def extract_architecture_aware_circuit(
-        g: BaseGraph[VT, ET],
+        graph: BaseGraph[VT, ET],
         architecture: Architecture,
         use_gate_mapping: bool = False,
         optimize_czs: bool = True,
@@ -39,29 +46,60 @@ def extract_architecture_aware_circuit(
         how far the extraction got. If you want to keep the original `g`
         then input `g.copy()` into `extract_circuit`.
     """
-    outputs = list(g.outputs())
-    gadgets = get_all_gadgets(g)
-    circuit = Circuit(len(outputs))
-    frontier = init_frontier(g, circuit, True)
-    architecture_copy = Architecture(name=architecture.name, coupling_graph=architecture.graph.copy(), qubit_map=list(range(len(frontier))))
+    outputs = list(graph.outputs())
+    gadgets = get_all_gadgets(graph)
     
+    if use_gate_mapping:
+        circuit = QuantumCircuit(len(outputs))
+        # mapper = create_mapper()
+        # init_mapper(mapper, g.num_outputs())
+
+        path = Path(__file__).parent.parent.resolve()   
+        # create a neutral atom hybrid architecture
+        architecture_mapper = NeutralAtomHybridArchitecture(str(path)+"/mapper_files/rubidium.json")
+        # set mapper parameters (skip to use default values)
+        params = HybridMapperParameters()
+        # mapper should use SWAP gates or shuttling operations
+        params.gate_weight = 0
+        params.shuttling_weight = 1
+        # look-ahead weights
+        params.lookahead_weight_moves = 0.1
+        params.lookahead_weight_swaps = 0.1
+        # The initial mapping between atoms and hardware
+        params.initial_mapping = InitialCoordinateMapping.trivial
+        # If mapper should print debug information
+        params.verbose = True
+
+        # create mapper
+        mapper = HybridSynthesisMapper(arch=architecture_mapper, params=params)
+
+        mapper.init_mapping(graph.num_outputs(), InitialCircuitMapping.identity)
+    else:   
+        circuit = Circuit(len(outputs))
+
+    frontier = init_frontier(graph, circuit, True)
+    architecture_copy = Architecture(name=architecture.name, coupling_graph=architecture.graph.copy(), qubit_map=list(range(len(frontier))))
+        
     while True:
-        czs_saved = clean_frontier(g, circuit, frontier, optimize_czs)
+        czs_saved = clean_frontier(graph, circuit, frontier, optimize_czs)
 
         if use_gate_mapping:           
             # If we have extracted some CZ gates, we need to add them to the circuit
-            architecture_copy, circuit_index = gate_mapper(circuit, len(frontier))
-            circuit = Circuit(len(outputs))
+            architecture_new, circuit_index = gate_mapper(mapper, circuit)
+            if architecture_new.qubit_map != architecture_copy.qubit_map:
+                frontier = reorder_frontier(frontier, architecture_copy)
+                architecture_copy = architecture_new
+            circuit = QuantumCircuit(len(outputs))
         
         # Now we can proceed with the actual extraction
         # First make sure that frontier is connected in correct way to inputs
-        neighbor_set = neighbors_of_frontier(g, frontier, inverse=True)
+        neighbor_set = neighbors_of_frontier(graph, frontier, inverse=True)
    
         if not frontier:
             break  # No more vertices to be processed. We are done.
         
         # First we check if there is a phase gadget in the way
-        if remove_gadget(g, frontier, True):
+        if remove_gadget(graph, frontier, True):
             # There was a gadget in the way. Go back to the top
             continue
         
@@ -71,18 +109,18 @@ def extract_architecture_aware_circuit(
         frontier_with_removed = {i: -1 for i in range(len(outputs))}
         frontier_with_removed.update(frontier)
 
-        m = bi_adj(g, neighbors, frontier_with_removed.values())
+        m = bi_adj(graph, neighbors, frontier_with_removed.values())
         if all(sum(row) != 1 for row in m.data):  # No easy vertex
             
             if use_gate_mapping:
-                cnots = get_all_cnot_operations(g, frontier, neighbors, architecture_copy)
+                cnots = get_all_cnot_operations(graph, frontier, neighbors, architecture_copy)
             else:
-                cnots = [get_cnot_row_operations(g, frontier, neighbors, architecture_copy)]
+                cnots = [get_cnot_row_operations(graph, frontier, neighbors, architecture_copy)]
                 # cnots = [[CNOT(control=cnot.target, target=cnot.control) for cnot in cnots]]
 
             
             if all(not c for c in cnots):  # No CNOTs found
-                if not eliminate_yz_spider(g, frontier, neighbors, circuit):
+                if not eliminate_yz_spider(graph, frontier, neighbors, circuit):
                     raise Exception("Extraction failed")
                 cnots = [[]]
 
@@ -96,7 +134,7 @@ def extract_architecture_aware_circuit(
         cnot_data = {"circuits": [], "graphs": [], "frontier": [], "matrix": [], "neighbors": []}
         for cnot_list in cnots:
             if use_gate_mapping:
-                graph_copy = g.clone()
+                graph_copy = graph.clone()
                 frontier_copy = frontier.copy()
                 m_copy = m.copy()
                 neighbors_copy = neighbors.copy()
@@ -109,33 +147,39 @@ def extract_architecture_aware_circuit(
             else:
                 if len(cnots) > 1:
                     raise ValueError("Multiple CNOTs not supported without gate mapping")
-                circuit, extracted = apply_cnots(g, circuit, frontier, cnot_list, m, neighbors, inverse=True)
+                circuit, extracted = apply_cnots(graph, circuit, frontier, cnot_list, m, neighbors, inverse=True)
                 if not quiet: print("Vertices extracted:", extracted)
 
         if use_gate_mapping:
-            architecture_copy, circuit_index = gate_mapper(cnot_data["circuits"], len(frontier))
-            circuit = Circuit(len(outputs))
-            g = cnot_data["graphs"][circuit_index]
+            architecture_new, circuit_index = gate_mapper(mapper, cnot_data["circuits"])
+            circuit = QuantumCircuit(len(outputs))
+            graph = cnot_data["graphs"][circuit_index]
             frontier = cnot_data["frontier"][circuit_index]
             m = cnot_data["matrix"][circuit_index]
             neighbors = cnot_data["neighbors"][circuit_index]
 
+            if architecture_new.qubit_map != architecture_copy.qubit_map:
+                frontier = reorder_frontier(frontier, architecture_copy)
+            architecture_copy = architecture_new
+
+            if not quiet and len(cnots[circuit_index])>0: print(f"      Cnot elimination with {cnots[circuit_index]} CNOTs")
+
     # for shuttle in reversed(shuttle_list):
     #     c.add_gate(shuttle)
     # Outside of loop. Finish up the permutation
-    id_simp(g, quiet=True)  # Now the graph should only contain inputs and outputs
+    id_simp(graph, quiet=True)  # Now the graph should only contain inputs and outputs
     # Since we were extracting from right to left, we reverse the order of the gates
 
     if use_gate_mapping:
-        return get_circuit_from_mapper()
+        return get_circuit_from_mapper(mapper)
     
     circuit.gates = list(reversed(circuit.gates))
-    return graph_to_swaps(g, up_to_perm) + circuit
+    return graph_to_swaps(graph, up_to_perm) + circuit
 
 
 
 
-def clean_frontier(g: BaseGraph[VT, ET], c: Circuit, frontier: Dict[int, VT], optimize_czs: bool = True) -> int:
+def clean_frontier(g: BaseGraph[VT, ET], circuit: Circuit|QuantumCircuit, frontier: Dict[int, VT], optimize_czs: bool = True) -> int:
     """Remove single qubit gates from the frontier and any CZs between the vertices in the frontier
     Returns the number of CZs saved if `optimize_czs` is True; otherwise returns 0"""
     phases = g.phases()
@@ -145,10 +189,16 @@ def clean_frontier(g: BaseGraph[VT, ET], c: Circuit, frontier: Dict[int, VT], op
         b = [w for w in g.neighbors(vertex) if w in outputs][0]
         e = g.edge(vertex, b)
         if g.edge_type(e) == EdgeType.HADAMARD:
-            c.add_gate("HAD", qubit)
+            if isinstance(circuit, Circuit):
+                circuit.add_gate("HAD", qubit)
+            else:
+                circuit.h(qubit)
             g.set_edge_type(e, EdgeType.SIMPLE)
         if phases[vertex]:
-            c.add_gate("ZPhase", qubit, phases[vertex])
+            if isinstance(circuit, Circuit):
+                circuit.add_gate("ZPhase", qubit, phases[vertex])
+            else:
+                circuit.rz(phases[vertex].numerator/phases[vertex].denominator, qubit)
             g.set_phase(vertex, 0)
 
     # And now on to CZ gates
@@ -167,19 +217,28 @@ def clean_frontier(g: BaseGraph[VT, ET], c: Circuit, frontier: Dict[int, VT], op
         while len(overlap_data[1]) > 2:  # there are enough common qubits to be worth optimizing
             i, j = overlap_data[0][0], overlap_data[0][1]
             czs_saved += len(overlap_data[1]) - 2
-            c.add_gate("CNOT", i, j)
+            if isinstance(circuit, Circuit):
+                circuit.add_gate("CNOT", i, j)
+            else:
+                circuit.cx(i, j)
             for qb in overlap_data[1]:
-                c.add_gate("CZ", j, qb)
+                circuit.add_gate("CZ", j, qb)
                 cz_mat.data[i][qb] = 0
                 cz_mat.data[j][qb] = 0
                 cz_mat.data[qb][i] = 0
                 cz_mat.data[qb][j] = 0
-            c.add_gate("CNOT", i, j)
+            if isinstance(circuit, Circuit):
+                circuit.add_gate("CNOT", i, j)
+            else:
+                circuit.cx(i, j)
             overlap_data = max_overlap(cz_mat)
 
     for i in range(len(outputs)):
         for j in range(i + 1, len(outputs)):
             if cz_mat.data[i][j] == 1:
-                c.add_gate("CZ", i, j)
+                if isinstance(circuit, Circuit):
+                    circuit.add_gate("CZ", i, j)
+                else:
+                    circuit.cz(i, j)
 
     return czs_saved
