@@ -1,4 +1,4 @@
-import os
+from fractions import Fraction
 from pathlib import Path
 from typing import Tuple
 import numpy as np
@@ -77,7 +77,19 @@ def gate_mapper(mapper:HybridSynthesisMapper, circuit: Circuit | list[Circuit]) 
     
     return Architecture("new_coupling", coupling_matrix=adjacency_matrix), index
 
-def get_circuit_from_mapper(mapper:HybridSynthesisMapper) -> Circuit:
+def get_circuit_from_mapper(mapper:HybridSynthesisMapper, get_exact_phases:bool=False) -> Circuit:
     synthesized_circuit_qasm = mapper.get_synthesized_qc()
     circuit = QASMParser().parse(synthesized_circuit_qasm)
+    for gate in circuit.gates:
+        if hasattr(gate, "phase"):
+            exact_phase = gate.phase * np.pi
+
+            if not get_exact_phases:
+                rounded_phase = Fraction().from_float(round(exact_phase / 0.25) * 0.25)
+                gate.phase = rounded_phase
+            else:
+                gate.phase = Fraction().from_float(exact_phase)
+
     return circuit
+
+

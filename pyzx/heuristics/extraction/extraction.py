@@ -56,7 +56,7 @@ def extract_architecture_aware_circuit(
 
         path = Path(__file__).parent.parent.resolve()   
         # create a neutral atom hybrid architecture
-        architecture_mapper = NeutralAtomHybridArchitecture(str(path)+"/mapper_files/rubidium.json")
+        architecture_mapper = NeutralAtomHybridArchitecture(str(path)+"/mapper_files/rubidium_sim.json")
         # set mapper parameters (skip to use default values)
         params = HybridMapperParameters()
         # mapper should use SWAP gates or shuttling operations
@@ -171,8 +171,8 @@ def extract_architecture_aware_circuit(
     # Since we were extracting from right to left, we reverse the order of the gates
 
     if use_gate_mapping:
-        return get_circuit_from_mapper(mapper)
-    
+        circuit = get_circuit_from_mapper(mapper, get_exact_phases=False)
+
     circuit.gates = list(reversed(circuit.gates))
     return graph_to_swaps(graph, up_to_perm) + circuit
 
