@@ -11,6 +11,21 @@ class ReroutedGate():
         self.basic_gate = basic_gate
         self.gate_path = gate_path
 
+    def is_gate_rerouted(self) -> bool:
+        return len(self.gate_path) > 1
+
+    def __repr__(self) -> str:
+        return f"{self.basic_gate} -> {self.gate_path}"
+
+    def __str__(self) -> str:
+        return f"{self.basic_gate} -> {self.gate_path}"
+    
+    def __add__(self, other):
+        return self.gate_path + other.gate_path
+    
+    def __radd__(self, other):
+        return other + self.gate_path
+
 
 def move_control(gate:Gate, control:int, new_control:int):
     """Given a gate and a control qubit, returns a new gate with the control qubit replaced with the new control qubit"""
@@ -63,7 +78,7 @@ def move_target_to_control(architecture:Architecture, path:List[int], gate:Gate)
     return rerouting_result
 
 
-def build_connection_from_architecture(architecture: Architecture, gate:Gate) -> List[CNOT]:
+def build_connection_from_architecture(architecture: Architecture, gate:Gate) -> List[Gate]:
     """Given a gate and an architecture, returns a list of CNOTs that connect the qubits of the gate
     according to the architecture"""
 
@@ -80,7 +95,8 @@ def build_connection_from_architecture(architecture: Architecture, gate:Gate) ->
     else:
         control_qubits = [gate.control]
 
-    subgraph_verticies = [architecture.qubit2vertex(qubit) for qubit in [target_qubit]+control_qubits]
+    if architecture:
+        subgraph_verticies = [architecture.qubit2vertex(qubit) for qubit in [target_qubit]+control_qubits if qubit is not None]
 
     if architecture and not architecture.is_subgraph_connected(subgraph_verticies):
 

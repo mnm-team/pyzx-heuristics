@@ -49,7 +49,6 @@ def gate_mapper(mapper:HybridSynthesisMapper, circuit: Circuit | list[Circuit]) 
     if not isinstance(circuit, list):
         circuit = [circuit]
 
-
     qiskit_circuits = []
 
     for circ in circuit:
@@ -75,9 +74,9 @@ def gate_mapper(mapper:HybridSynthesisMapper, circuit: Circuit | list[Circuit]) 
     #     if i < num_qubits - 1:
     #         m[i, i+1] = 1
     
-    return Architecture("new_coupling", coupling_matrix=adjacency_matrix), index
+    return Architecture("new_coupling", coupling_matrix=adjacency_matrix, qubit_map=list(range(qiskit_circuits[index].num_qubits))), index
 
-def get_circuit_from_mapper(mapper:HybridSynthesisMapper, get_exact_phases:bool=False) -> Circuit:
+def get_circuit_from_mapper(mapper:HybridSynthesisMapper, get_exact_phases:bool=False) -> Tuple[Circuit, Architecture]:
     synthesized_circuit_qasm = mapper.get_synthesized_qc()
     circuit = QASMParser().parse(synthesized_circuit_qasm)
     for gate in circuit.gates:
@@ -90,6 +89,10 @@ def get_circuit_from_mapper(mapper:HybridSynthesisMapper, get_exact_phases:bool=
             else:
                 gate.phase = Fraction().from_float(exact_phase)
 
-    return circuit
+    adjacency_matrix = np.array(mapper.get_circuit_adjacency_matrix())
+    
+    new_arch = Architecture("new_coupling", coupling_matrix=adjacency_matrix)
+
+    return circuit, new_arch
 
 

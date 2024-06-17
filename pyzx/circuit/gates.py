@@ -1171,6 +1171,7 @@ class DiscardBit(Gate):
         c_mapper.set_next_row(self.target, r+2)
 
 class Measurement(Gate):
+    name = "Measure"
     target: int
     result_bit: Optional[int]
 
