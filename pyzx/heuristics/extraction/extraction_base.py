@@ -339,6 +339,10 @@ def get_best_cnot_configuration(rerouted_gate_list: List[List[ReroutedGate]], ar
         #     if new_cost < best_result[2]:
         #         best_result = (new_cnots, shuttle_gate, new_cost)
         # else:
+
+        if not all(rerouted_gate.is_viable_for_architecture(architecture) for rerouted_gate in rerouted_gates):
+            continue
+
         if (sum_cnots := sum(len(rerouted_gate.gate_path) for rerouted_gate in rerouted_gates)) < best_result[1]:
             best_result = (rerouted_gates, sum_cnots)
 
@@ -846,13 +850,13 @@ def get_all_cnot_operations(
             cnot_list_arch = filter_duplicate_cnots(cnot_list_arch)
             cnots_arch = [CNOT(cnot.target, cnot.control) for cnot in cnot_list_arch]
 
-            cnots = [ReroutedGate(cnot, [cnot]) for cnot in cnot_list_arch]
+            cnots.append([ReroutedGate(cnot, [cnot]) for cnot in cnots_arch])
 
         cnot_list_no_arch = m2_no_arch.to_cnots(optimize=True)
         cnot_list_no_arch = filter_duplicate_cnots(cnot_list_no_arch)
+        cnots_no_arch = [CNOT(cnot.target, cnot.control) for cnot in cnot_list_no_arch]
 
-        cnots += [ReroutedGate(cnot, [cnot]) for cnot in cnot_list_no_arch]
-        cnots = [cnots]
+        cnots.append([ReroutedGate(cnot, [cnot]) for cnot in cnots_no_arch])
 
         if not any([sum(row) == 1 for row in m2.data]):
             return None

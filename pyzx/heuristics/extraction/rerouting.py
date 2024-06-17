@@ -21,6 +21,32 @@ class ReroutedGate():
         
         self.basic_gate.target, self.basic_gate.control = self.basic_gate.control, self.basic_gate.target
 
+    def is_viable_for_architecture(self, architecture:Architecture) -> bool:
+
+        for gate in self.gate_path:
+            if not hasattr(gate, "target"):
+                raise ValueError("Gate does not have a target qubit")
+            
+            target_qubit = gate.target
+
+            if not hasattr(gate, "control"):
+                if hasattr(gate, "controls"):
+                    control_qubits = gate.controls
+                elif hasattr(gate, "ctrl1") and hasattr(gate, "ctrl2"):
+                    control_qubits = [gate.ctrl1, gate.ctrl2]
+                else:
+                    raise ValueError("Gate does not have controls")
+            else:
+                control_qubits = [gate.control]
+
+            if architecture:
+                subgraph_verticies = [architecture.qubit2vertex(qubit) for qubit in [target_qubit]+control_qubits if qubit is not None]
+
+            if architecture and not architecture.is_subgraph_connected(subgraph_verticies):
+                return False
+
+        return True
+
     def __repr__(self) -> str:
         return f"{self.basic_gate} -> {self.gate_path}"
 
