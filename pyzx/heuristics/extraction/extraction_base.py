@@ -1008,6 +1008,7 @@ def extract_rzs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|Q
 
 def extract_cnots(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|QuantumCircuit, rerouted_cnots: List[ReroutedGate]):
     """Extracts CNOT gates resulting from gaussian elimination to circuit and adds the Hadamard wires of the corresponding frontier vertices"""
+    
     basic_cnots = [rerouted_gate.basic_gate for rerouted_gate in rerouted_cnots]
     full_cnots = sum(rerouted_cnots, [])
 

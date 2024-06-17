@@ -153,6 +153,9 @@ def apply_cnots(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier:Dict[int, 
     frontier_with_removed = {i: -1 for i in range(len(g.inputs()))}
     frontier_with_removed.update(frontier)
 
+    for rerouted_cnot in rerouted_cnots:
+        rerouted_cnot.reverse_gate_qubits()
+
     cnots = [rerouted_gate.basic_gate for rerouted_gate in rerouted_cnots]
     
     m = bi_adj(g, frontier_neighbors, list(frontier_with_removed.values()))

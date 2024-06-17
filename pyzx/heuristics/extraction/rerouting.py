@@ -13,6 +13,13 @@ class ReroutedGate():
 
     def is_gate_rerouted(self) -> bool:
         return len(self.gate_path) > 1
+    
+    def reverse_gate_qubits(self):
+        assert(all(hasattr(gate, "target") and hasattr(gate, "control") for gate in self.gate_path))
+        for gate in self.gate_path:
+            gate.target, gate.control = gate.control, gate.target
+        
+        self.basic_gate.target, self.basic_gate.control = self.basic_gate.control, self.basic_gate.target
 
     def __repr__(self) -> str:
         return f"{self.basic_gate} -> {self.gate_path}"
@@ -148,13 +155,13 @@ def build_connection_from_architecture(architecture: Architecture, gate:Gate) ->
             #TODO: check for shuttling
             for i in range(len(shortest_qubit_path)-2):
                 rerouting_result.append(CNOT(shortest_qubit_path[i], shortest_qubit_path[i+1]))
-            rerouting_result.append(gate_copy)
+            rerouting_result.append(gate_copy.copy())
             for i in range(len(shortest_qubit_path)-2, 0, -1):
                 rerouting_result.append(CNOT(shortest_qubit_path[i-1], shortest_qubit_path[i]))
 
             for i in range(1, len(shortest_qubit_path)-2):
                 rerouting_result.append(CNOT(shortest_qubit_path[i], shortest_qubit_path[i+1]))
-            rerouting_result.append(gate_copy)
+            rerouting_result.append(gate_copy.copy())
             for i in range(len(shortest_vertex_path)-2, 1, -1):
                 rerouting_result.append(CNOT(shortest_qubit_path[i-1], shortest_qubit_path[i]))
 
