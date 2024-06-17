@@ -7,7 +7,7 @@ from pyzx.circuit import Circuit
 from pyzx.circuit.gates import CNOT, CZ, HAD, ZPhase
 from pyzx.extract import graph_to_swaps, max_overlap
 from pyzx.graph.base import ET, VT, BaseGraph
-from pyzx.heuristics.extraction.extraction_base import add_gate_to_circuit, apply_cnots, bi_adj, get_all_cnot_operations, get_all_gadgets, get_cnot_row_operations, init_frontier, neighbors_of_frontier, remove_gadget, reorder_frontier
+from pyzx.heuristics.extraction.extraction_base import add_gate_to_circuit, apply_cnots, bi_adj, get_all_cnot_operations, get_all_gadgets, get_cnot_row_operations, init_frontier, get_neighbors_of_frontier, remove_gadget, reorder_frontier, update_graph_for_frontier_neighbor_in_end
 from pyzx.heuristics.extraction.extraction_mcp import eliminate_yz_spider
 from pyzx.heuristics.extraction.mapper import create_mapper, gate_mapper, get_circuit_from_mapper, init_mapper
 from pyzx.heuristics.extraction.rerouting import ReroutedGate
@@ -96,7 +96,10 @@ def extract_architecture_aware_circuit(
         
         # Now we can proceed with the actual extraction
         # First make sure that frontier is connected in correct way to inputs
-        neighbor_set = neighbors_of_frontier(graph, frontier, inverse=True)
+        neighbor_set = get_neighbors_of_frontier(graph, frontier, inverse=True)
+        new_vertices = update_graph_for_frontier_neighbor_in_end(graph, frontier, True)
+        if new_vertices:
+            neighbor_set.update(new_vertices)
    
         if not frontier:
             break  # No more vertices to be processed. We are done.

@@ -11,7 +11,7 @@ from pyzx.circuit import Circuit
 from pyzx.circuit.gates import HAD, ZPhase
 from pyzx.extract import graph_to_swaps
 from pyzx.graph.base import ET, VT, BaseGraph
-from pyzx.heuristics.extraction.extraction_base import MCP, add_gate_to_circuit, bi_adj, complement_neighbors, eliminate_unary_phase_gadgets, extract_cnots, extract_czs, extract_rzs, get_all_cnot_operations, get_cnot_row_operations, get_frontier_gadget_dict, init_frontier, neighbors_of_frontier, reorder_frontier
+from pyzx.heuristics.extraction.extraction_base import MCP, add_gate_to_circuit, bi_adj, complement_neighbors, eliminate_unary_phase_gadgets, extract_cnots, extract_czs, extract_rzs, get_all_cnot_operations, get_cnot_row_operations, get_frontier_gadget_dict, init_frontier, get_neighbors_of_frontier, reorder_frontier
 from pyzx.heuristics.extraction.mapper import create_mapper, gate_mapper, init_mapper, get_circuit_from_mapper
 from pyzx.heuristics.extraction.rerouting import ReroutedGate, build_connection_from_architecture
 from pyzx.heuristics.tools import insert_identity
@@ -94,7 +94,7 @@ def mcp_aware_extract(
             pass
 
         if frontier and not (rz_gates or mcp_gates or cz_gates):
-            frontier_neighbors = list(neighbors_of_frontier(graph, frontier))
+            frontier_neighbors = list(get_neighbors_of_frontier(graph, frontier))
 
             if use_gate_mapping:
                 rerouted_cnot_list = get_all_cnot_operations(graph, frontier, frontier_neighbors, architecture=architecture_copy)

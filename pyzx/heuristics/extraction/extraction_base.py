@@ -529,19 +529,35 @@ def rearrange_columns_for_architecture(m: Mat2, architecture: Architecture, swap
         return None
 
 
-def neighbors_of_frontier(
+def get_neighbors_of_frontier(
         g: BaseGraph[VT, ET], 
         frontier: Dict[int, VT],
         inverse: bool = False
         ) -> Set[VT]:
-    """Returns the set of neighbors of the frontier. When collecting the vertices, it also checks if the vertices
-    of the frontier are connected correctly to the inputs.
-    If a frontier vertex is only connected to an input, it is removed from the frontier.
-    If a frontier vertex is connected to an input and some other vertices, it is disconnected from the input via a new
+    """Returns the set of neighbors of the frontier."""
+    neighbor_set = set()
+
+    start = g.inputs() if not inverse else g.outputs()
+    end = g.outputs() if not inverse else g.inputs()
+
+    for _, vertex in frontier.copy().items():
+        non_start_neighbors = [neighbor for neighbor in g.neighbors(vertex) if neighbor not in start+end]
+        neighbor_set.update(non_start_neighbors)
+    return neighbor_set
+
+
+def update_graph_for_frontier_neighbor_in_end(
+        g: BaseGraph[VT, ET], 
+        frontier: Dict[int, VT],
+        inverse: bool = False
+        ) -> Set[VT]:
+    """Checks if the vertices of the frontier are connected correctly to the end.
+    If a frontier vertex is only connected to an end vertex, it is removed from the frontier.
+    If a frontier vertex is connected to an end vertex and some other vertices, it is disconnected from the input via a new
     spider."""
     qs = g.qubits()
     rs = g.rows()
-    neighbor_set = set()
+    new_verticies = set()
 
     start = g.inputs() if not inverse else g.outputs()
     end = g.outputs() if not inverse else g.inputs()
@@ -565,8 +581,10 @@ def neighbors_of_frontier(
             g.add_edge(g.edge(new_vertex, first_end), toggle_edge(edge_type))
             non_start_neighbors.remove(first_end)
             non_start_neighbors.append(new_vertex)
-        neighbor_set.update(non_start_neighbors)
-    return neighbor_set
+
+            new_verticies.add(new_vertex)
+
+    return new_verticies
 
 def get_frontier_neighbors(g: BaseGraph, frontier: Dict[int, VT]):
     """Given a graph and a frontier set, returns all (non-output) neighbors of the frontier as a set"""
@@ -1041,7 +1059,8 @@ def extract_cnots(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit
                 # special case: neighbor of "control" spider is an input, therefore we need to insert a spider between input and control spider
                 vnew = insert_identity(g, fcont, v)
                 break
-    
+        
+        neighbors_without_start = [neighbor for neighbor in g.neighbors(fcont) if neighbor not in g.inputs()]
         for v in neighbors_without_start:
             # remove wire
             if g.connected(ftarg,v):
