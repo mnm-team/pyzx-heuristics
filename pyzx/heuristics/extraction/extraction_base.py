@@ -10,6 +10,7 @@ from qiskit import QuantumCircuit
 
 from pyzx.circuit import Circuit
 from pyzx.circuit.gates import CNOT, CZ, HAD, Gate, ZPhase
+from pyzx.drawing import draw_matplotlib
 from pyzx.extract import column_optimal_swap, connectivity_from_biadj, filter_duplicate_cnots, xor_rows
 from pyzx.graph.base import ET, VT, BaseGraph
 from pyzx.heuristics.extraction.rerouting import ReroutedGate, build_connection_from_architecture
@@ -17,7 +18,7 @@ from pyzx.linalg import Z2, CNOTMaker, Mat2
 from pyzx.routing.architecture import Architecture
 from pyzx.routing.cnot_mapper import ElimMode, gauss
 from pyzx.heuristics.tools import insert_identity
-from pyzx.simplify import apply_rule, pivot, lcomp_with_boundaries
+from pyzx.simplify import apply_rule, full_reduce, pivot, lcomp_with_boundaries
 from pyzx.utils import EdgeType, FractionLike, VertexType, phase_is_true_clifford, toggle_edge
 
 
@@ -171,6 +172,23 @@ def add_gate_to_circuit(circuit: Circuit|QuantumCircuit, gate:Gate):
                 circuit.cu(gate.theta, gate.phi, gate.rho, gate.gamma, gate.control, gate.target)
             case "Measure":
                 circuit.measure(gate.target)
+
+
+def get_full_graph_from_partial_graph_and_circuit(partial_graph: BaseGraph, partial_circuit: Circuit, fr:bool, inverse:bool=False) -> BaseGraph:
+
+    second_partial_graph = partial_circuit.to_graph()
+    if inverse:
+        full_graph = partial_graph + second_partial_graph
+    else:
+        full_graph = second_partial_graph + partial_graph
+
+    if fr:
+        full_reduce(full_graph)
+
+    return full_graph
+
+
+    
 
 
 
@@ -845,18 +863,19 @@ def get_all_cnot_operations(
         cnots = []
         m2_no_arch = m2.copy()
 
-        if architecture:
-            cnot_list_arch, rank = gauss(architecture=architecture, matrix=m2, mode=elim_mode, full_reduce=True)
-            cnot_list_arch = filter_duplicate_cnots(cnot_list_arch)
-            cnots_arch = [CNOT(cnot.target, cnot.control) for cnot in cnot_list_arch]
+        # if architecture:
+        #     #FIXME: This does not seem to work is a frontier is already removed
+        #     cnot_list_arch, rank = gauss(architecture=architecture, matrix=m2, mode=elim_mode, full_reduce=True)
+        #     cnot_list_arch = filter_duplicate_cnots(cnot_list_arch)
+        #     # cnots_arch = [CNOT(cnot.target, cnot.control) for cnot in cnot_list_arch]
 
-            cnots.append([ReroutedGate(cnot, [cnot]) for cnot in cnots_arch])
+        #     cnots.append([ReroutedGate(cnot, [cnot.copy()]) for cnot in cnot_list_arch])
 
         cnot_list_no_arch = m2_no_arch.to_cnots(optimize=True)
         cnot_list_no_arch = filter_duplicate_cnots(cnot_list_no_arch)
         cnots_no_arch = [CNOT(cnot.target, cnot.control) for cnot in cnot_list_no_arch]
 
-        cnots.append([ReroutedGate(cnot, [cnot]) for cnot in cnots_no_arch])
+        cnots.append([ReroutedGate(cnot, build_connection_from_architecture(architecture, cnot.copy())) for cnot in cnots_no_arch])
 
         if not any([sum(row) == 1 for row in m2.data]):
             return None
@@ -1028,11 +1047,16 @@ def extract_rzs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|Q
 
     return phase_change
 
+
 def extract_cnots(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|QuantumCircuit, rerouted_cnots: List[ReroutedGate]):
     """Extracts CNOT gates resulting from gaussian elimination to circuit and adds the Hadamard wires of the corresponding frontier vertices"""
-    
+    frontier_with_removed = {i: in_vertex for i, in_vertex in enumerate(g.inputs())}
+    frontier_with_removed.update(frontier)
+
     basic_cnots = [rerouted_gate.basic_gate for rerouted_gate in rerouted_cnots]
     full_cnots = sum(rerouted_cnots, [])
+
+    ignore_input_vertices = {v: list(g.neighbors(v)) for v in g.inputs()}
 
     for cnot in full_cnots:
         # CNOT = H+CZ+H
@@ -1054,17 +1078,28 @@ def extract_cnots(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit
         # if control_qubit not in frontier or target_qubit not in frontier:
         #     continue
 
-        ftarg = frontier[control_qubit]
-        fcont = frontier[target_qubit] 
+        ftarg = frontier_with_removed[control_qubit]
+        fcont = frontier_with_removed[target_qubit] 
 
-        neighbors_without_start = [neighbor for neighbor in g.neighbors(fcont) if neighbor not in g.inputs()]
+        neighbors_without_start = [neighbor for neighbor in list(g.neighbors(fcont)) if neighbor not in g.inputs()]
+        
+        if fcont in g.inputs():
+            for ignore_vertex in ignore_input_vertices[fcont]:
+                neighbors_without_start.remove(ignore_vertex)
+        
         for v in neighbors_without_start:
             if g.type(v) == VertexType.BOUNDARY:
                 # special case: neighbor of "control" spider is an input, therefore we need to insert a spider between input and control spider
                 vnew = insert_identity(g, fcont, v)
                 break
+
+        #TODO: this should not be needed to be called again.
+        neighbors_without_start = [neighbor for neighbor in list(g.neighbors(fcont)) if neighbor not in g.inputs()]
         
-        neighbors_without_start = [neighbor for neighbor in g.neighbors(fcont) if neighbor not in g.inputs()]
+        if fcont in g.inputs():
+            for ignore_vertex in ignore_input_vertices[fcont]:
+                neighbors_without_start.remove(ignore_vertex)
+        
         for v in neighbors_without_start:
             # remove wire
             if g.connected(ftarg,v):
