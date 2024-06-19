@@ -1,4 +1,3 @@
-from fractions import Fraction
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -7,10 +6,9 @@ from pyzx.circuit import Circuit
 from pyzx.circuit.gates import CNOT, CZ, HAD, ZPhase
 from pyzx.extract import graph_to_swaps, max_overlap
 from pyzx.graph.base import ET, VT, BaseGraph
-from pyzx.heuristics.extraction.extraction_base import add_gate_to_circuit, apply_cnots, bi_adj, get_all_cnot_operations, get_all_gadgets, get_cnot_row_operations, init_frontier, get_neighbors_of_frontier, remove_gadget, reorder_frontier, update_graph_for_frontier_neighbor_in_end
+from pyzx.heuristics.extraction.extraction_base import add_gate_to_circuit, bi_adj, get_all_cnot_operations, get_all_gadgets, get_cnot_row_operations, init_frontier, get_neighbors_of_frontier, remove_gadget, update_graph_for_frontier_neighbor_in_end, update_graph_with_cnots
 from pyzx.heuristics.extraction.extraction_mcp import eliminate_yz_spider
-from pyzx.heuristics.extraction.mapper import create_mapper, gate_mapper, get_circuit_from_mapper, init_mapper
-from pyzx.heuristics.extraction.rerouting import ReroutedGate
+from pyzx.heuristics.extraction.mapper import gate_mapper, get_circuit_from_mapper
 from pyzx.linalg import Mat2
 from pyzx.routing.architecture import Architecture
 from pyzx.simplify import id_simp
@@ -78,6 +76,7 @@ def extract_architecture_aware_circuit(
         mapper.init_mapping(graph.num_outputs(), InitialCircuitMapping.identity)
     else:   
         circuit = Circuit(len(outputs))
+        mapper = None
 
     frontier = init_frontier(graph, circuit, True)
     architecture_copy = Architecture(name=architecture.name, coupling_graph=architecture.graph.copy(), qubit_map=list(range(len(frontier))))
@@ -109,24 +108,24 @@ def extract_architecture_aware_circuit(
             # There was a gadget in the way. Go back to the top
             continue
         
-        neighbors = list(neighbor_set)
+        frontier_neighbors = list(neighbor_set)
 
         #TODO: Check if this is needed. In theory, if this is not done it could lead to cnots which are not allowed by the architecture
         frontier_with_removed = {i: -1 for i in range(len(outputs))}
         frontier_with_removed.update(frontier)
 
-        m = bi_adj(graph, neighbors, frontier_with_removed.values())
+        m = bi_adj(graph, frontier_neighbors, frontier_with_removed.values())
         if all(sum(row) != 1 for row in m.data):  # No easy vertex
             
             if use_gate_mapping:
-                rerouted_cnot_list = get_all_cnot_operations(graph, frontier, neighbors, architecture_copy)
+                rerouted_cnot_list = get_all_cnot_operations(graph, frontier, frontier_neighbors, architecture_copy)
             else:
-                rerouted_cnot_list = get_cnot_row_operations(graph, frontier, neighbors, architecture_copy)
+                rerouted_cnot_list = get_cnot_row_operations(graph, frontier, frontier_neighbors, architecture_copy)
                 if rerouted_cnot_list:
                     rerouted_cnot_list = [rerouted_cnot_list]
 
             if not rerouted_cnot_list:  # No CNOTs found
-                if not eliminate_yz_spider(graph, frontier, neighbors, circuit):
+                if not eliminate_yz_spider(graph, frontier, frontier_neighbors, circuit):
                     raise Exception("Extraction failed")
                 rerouted_cnot_list = [[]]
 
@@ -135,41 +134,10 @@ def extract_architecture_aware_circuit(
             if not quiet: print("Simple vertex")
             rerouted_cnot_list = [[]]
 
-
-        cnot_data = {"circuits": [], "graphs": [], "frontier": [], "matrix": [], "neighbors": []}
-
-
-        for cnot_list in rerouted_cnot_list:
-            if use_gate_mapping:
-                apply_cnots_to_circuit(graph, frontier, neighbors, m, cnot_data, cnot_list)
-                if cnot_list and all(rerouted_cnot.is_gate_rerouted() for rerouted_cnot in cnot_list):
-                    basic_cnots = [ReroutedGate(rerouted_cnot.basic_gate, [rerouted_cnot.basic_gate]) for rerouted_cnot in cnot_list]
-                    apply_cnots_to_circuit(graph, frontier, neighbors, m, cnot_data, basic_cnots)
-            else:
-                if len(rerouted_cnot_list) > 1:
-                    raise ValueError("Multiple CNOTs not supported without gate mapping")
-                circuit, extracted = apply_cnots(graph, circuit, frontier, cnot_list, m, neighbors, inverse=True)
-                if not quiet: print("Vertices extracted:", extracted)
-
-        if use_gate_mapping:
-            architecture_new, circuit_index = gate_mapper(mapper, cnot_data["circuits"])
-
-            gate_names = [f"{gate[0].name}: {gate[0].params}" for gate in cnot_data["circuits"][circuit_index].data] 
-            ctest, new_arch = get_circuit_from_mapper(mapper, get_exact_phases=False)
-
-            circuit = QuantumCircuit(len(outputs))
-            graph = cnot_data["graphs"][circuit_index]
-            frontier = cnot_data["frontier"][circuit_index]
-            m = cnot_data["matrix"][circuit_index]
-            neighbors = cnot_data["neighbors"][circuit_index]
-
-            if architecture_new.qubit_map != architecture_copy.qubit_map:
-                architecture_copy = architecture_new
-
-            if not quiet and len(rerouted_cnot_list[circuit_index])>0: print(f"      Cnot elimination with {rerouted_cnot_list[circuit_index]} CNOTs")
-
-    # for shuttle in reversed(shuttle_list):
-    #     c.add_gate(shuttle)
+        graph, frontier, frontier_neighbors, circuit, architecture_new = update_graph_with_cnots(graph, circuit, mapper, frontier, frontier_neighbors, rerouted_cnot_list, inverse=True)
+        if architecture_new:
+            architecture_copy = architecture_new
+            
     # Outside of loop. Finish up the permutation
     id_simp(graph, quiet=True)  # Now the graph should only contain inputs and outputs
     # Since we were extracting from right to left, we reverse the order of the gates
@@ -179,18 +147,6 @@ def extract_architecture_aware_circuit(
 
     circuit.gates = list(reversed(circuit.gates))
     return graph_to_swaps(graph, up_to_perm) + circuit, architecture_copy
-
-def apply_cnots_to_circuit(graph, frontier, neighbors, m, cnot_data, cnot_list):
-    graph_copy = graph.clone()
-    frontier_copy = frontier.copy()
-    m_copy = m.copy()
-    neighbors_copy = neighbors.copy()
-    c, extracted = apply_cnots(graph_copy, None, frontier_copy, cnot_list, m_copy, neighbors_copy, inverse=True)
-    cnot_data["circuits"].append(c)
-    cnot_data["graphs"].append(graph_copy)
-    cnot_data["frontier"].append(frontier_copy)
-    cnot_data["matrix"].append(m_copy)
-    cnot_data["neighbors"].append(neighbors_copy)
 
 
 

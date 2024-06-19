@@ -9,11 +9,11 @@ from qiskit import QuantumCircuit
 
 from pyzx.circuit import Circuit
 from pyzx.circuit.gates import HAD, ZPhase
-from pyzx.extract import connectivity_from_biadj, graph_to_swaps
+from pyzx.extract import graph_to_swaps
 from pyzx.graph.base import ET, VT, BaseGraph
-from pyzx.heuristics.extraction.extraction_base import MCP, add_gate_to_circuit, bi_adj, complement_neighbors, eliminate_unary_phase_gadgets, extract_cnots, extract_czs, extract_rzs, get_all_cnot_operations, get_cnot_row_operations, get_frontier_gadget_dict, init_frontier, get_neighbors_of_frontier, update_graph_for_frontier_neighbor_in_end
+from pyzx.heuristics.extraction.extraction_base import MCP, add_gate_to_circuit, complement_neighbors, extract_czs, extract_rzs, get_all_cnot_operations, get_cnot_row_operations, get_frontier_gadget_dict, init_frontier, get_neighbors_of_frontier, update_graph_for_frontier_neighbor_in_end, update_graph_with_cnots
 from pyzx.heuristics.extraction.mapper import gate_mapper, get_circuit_from_mapper
-from pyzx.heuristics.extraction.rerouting import ReroutedGate, build_connection_from_architecture
+from pyzx.heuristics.extraction.rerouting import build_connection_from_architecture
 from pyzx.heuristics.tools import insert_identity
 from pyzx.routing.architecture import Architecture
 from pyzx.utils import EdgeType, VertexType
@@ -67,6 +67,7 @@ def mcp_aware_extract(
         mapper.init_mapping(graph.num_inputs(), InitialCircuitMapping.identity)
     else:   
         circuit = Circuit(graph.num_inputs())
+        mapper = None
    
     frontier = init_frontier(graph, circuit)
 
@@ -112,31 +113,10 @@ def mcp_aware_extract(
                     # import pdb
                     # pdb.set_trace()
             else:
-                cnot_data = {"circuits": [], "graphs": [], "frontier": [], "neighbors": []}
-                for cnot_list in rerouted_cnot_list:
-                    if use_gate_mapping:
-                        graph_copy = graph.clone()
-                        frontier_copy = frontier.copy()
-                        neighbors_copy = frontier_neighbors.copy()
-                        c = apply_cnots(graph_copy, None, frontier_copy, cnot_list, neighbors_copy)
-                        cnot_data["circuits"].append(c)
-                        cnot_data["graphs"].append(graph_copy)
-                        cnot_data["frontier"].append(frontier_copy)
-                        cnot_data["neighbors"].append(neighbors_copy)
-                    else:
-                        if len(rerouted_cnot_list) > 1:
-                            raise ValueError("Multiple CNOTs not supported without gate mapping")
-                        circuit = apply_cnots(graph, circuit, frontier, cnot_list, frontier_neighbors)
-
-                if use_gate_mapping:
-                    architecture_copy, circuit_index = gate_mapper(mapper, cnot_data["circuits"])
-                    circuit = QuantumCircuit(len(graph.inputs()))
-                    graph = cnot_data["graphs"][circuit_index]
-                    frontier = cnot_data["frontier"][circuit_index]
-                    frontier_neighbors = cnot_data["neighbors"][circuit_index]
-
-                    if len(rerouted_cnot_list[circuit_index])>0: print(f"      Cnot elimination with {rerouted_cnot_list[circuit_index]} CNOTs")
-
+                graph, frontier, frontier_neighbors, circuit, architecture_new = update_graph_with_cnots(graph, circuit, mapper, frontier, frontier_neighbors, rerouted_cnot_list)
+                if architecture_new:
+                    architecture_copy = architecture_new
+                    
         # if use_gate_mapping:
         #     circuit_after_step,_ = get_circuit_from_mapper(mapper)
         # else:
@@ -161,114 +141,8 @@ def mcp_aware_extract(
                 # import pdb
                 # pdb.set_trace()
                 return None
-            
-
-def apply_cnots(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier:Dict[int, VT], rerouted_cnots: List[ReroutedGate], frontier_neighbors:List[VT]):
-    #CNOT extraction
-    frontier_with_removed = {i: -1 for i in range(len(g.inputs()))}
-    frontier_with_removed.update(frontier)
-
-    basic_cnots = [rerouted_gate.basic_gate for rerouted_gate in rerouted_cnots]
-    
-    m = bi_adj(g, frontier_neighbors, list(frontier_with_removed.values()))
-    m_copy = m.copy()
-    for cnot in basic_cnots:
-        m.row_add(cnot.control, cnot.target)
-
-    if all(sum(row) != 1 for row in m.data):
-        raise Exception("CNOTs do not suffice to extract a vertex")
-    
-    start = g.inputs()
-
-    neighbors_copy = frontier_neighbors.copy()
-    for _ in range(len(frontier) - len(frontier_neighbors)):
-        neighbors_copy.append(-1)
-
-    for rerouted_cnot in rerouted_cnots:
-        rerouted_cnot.reverse_gate_qubits()
-
-    cnots = sum(rerouted_cnots, [])
-
-    if circuit is None:
-        circuit = QuantumCircuit(len(frontier_with_removed))
-
-    if len(cnots) > 0:
-        connectivity_from_biadj(g, m, neighbors_copy, list(frontier_with_removed.values()))
-
-    good_verts = dict()
-    for i, row in enumerate(m.data):
-        if sum(row) == 1:
-            qubit: int = list(frontier_with_removed)[i]
-            v = frontier_with_removed[qubit]
-            w = frontier_neighbors[[j for j in range(len(row)) if row[j]][0]]
-            good_verts[qubit] = (v, w)
-    if not good_verts:
-        raise Exception("No extractable vertex found. Something went wrong")
-    hads = []
-
-    for qubit, (v, w) in good_verts.items():  # Update frontier vertices
-        hads.append(qubit)
-        # c.add_gate("HAD",qubit_map[v])
-        try:
-            b = [o for o in g.neighbors(v) if o in start][0]
-        except:
-            pass
-        g.remove_vertex(v)
-        g.add_edge(g.edge(w, b))
-        frontier[qubit] = w
-
-    if circuit is None:
-        c_extracted_gates = QuantumCircuit(len(frontier_with_removed))
-        for cnot in cnots:
-            c_extracted_gates.cx(cnot.control, cnot.target)
-            # c_extracted_gates.add_gate("HAD",cnot.target)
-            # c_extracted_gates.add_gate("CZ", cnot.control, cnot.target)
-            # c_extracted_gates.add_gate("HAD",cnot.target)
-        for h in hads:
-            c_extracted_gates.h(h)
-        return c_extracted_gates, len(good_verts)
-
-    
-    for cnot in cnots:
-        add_gate_to_circuit(circuit=circuit, gate=cnot)
-        # c.append(HAD(cnot.target))
-        # c.append(CZ(cnot.control, cnot.target))
-        # c.append(HAD(cnot.target))
-    for h in hads:
-        add_gate_to_circuit(circuit=circuit, gate=HAD(h))
-
-    return circuit
 
 
-def apply_cnots2(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier:Dict[int, VT], rerouted_cnots: List[ReroutedGate], frontier_neighbors:List[VT]):
-    #CNOT extraction
-    frontier_with_removed = {i: -1 for i in range(len(g.inputs()))}
-    frontier_with_removed.update(frontier)
-
-    cnots = [rerouted_gate.basic_gate for rerouted_gate in rerouted_cnots]
-    
-    m = bi_adj(g, frontier_neighbors, list(frontier_with_removed.values()))
-    m_copy = m.copy()
-    for cnot in cnots:
-        m.row_add(cnot.control, cnot.target)
-
-    if all(sum(row) != 1 for row in m.data):
-        raise Exception("CNOTs do not suffice to extract a vertex")
-    
-    if circuit is None:
-        circuit = QuantumCircuit(len(frontier_with_removed))
-
-    for rerouted_cnot in rerouted_cnots:
-        rerouted_cnot.reverse_gate_qubits()
-    
-    # apply_cnots(g, c, frontier, cnots, m, frontier_neighbors)
-    extract_cnots(g, frontier, circuit, rerouted_cnots)
-    #eliminate possible unary phase gadgets (this happens since we do not immediately remove every YZ spider connected to the frontier)
-    eliminate_unary_phase_gadgets(g, frontier)
-    #Repeat rz extraction, in case unary phase gadget elimination created a new phase on the frontier
-    rz_gates = extract_rzs(g, frontier, circuit)
-
-    return circuit
 
 
 def get_maximal_mcp(g: BaseGraph, frontier: Dict[int,VT]):

@@ -7,9 +7,12 @@ from pyzx.routing.architecture import Architecture
 
 
 class ReroutedGate():
-    def __init__(self, basic_gate:Gate, gate_path:List[Gate]):
+    def __init__(self, basic_gate:Gate, gate_path:List[Gate]|None):
         self.basic_gate = basic_gate
-        self.gate_path = gate_path
+        if not gate_path:
+            self.gate_path = [basic_gate.copy()]
+        else:
+            self.gate_path = gate_path
 
     def is_gate_rerouted(self) -> bool:
         return len(self.gate_path) > 1
