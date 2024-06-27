@@ -8,10 +8,10 @@ from qiskit import QuantumCircuit
 
 
 from pyzx.circuit import Circuit
-from pyzx.circuit.gates import HAD, ZPhase
+from pyzx.circuit.gates import CZ, HAD, ZPhase
 from pyzx.extract import graph_to_swaps
 from pyzx.graph.base import ET, VT, BaseGraph
-from pyzx.heuristics.extraction.extraction_base import MCP, add_gate_to_circuit, complement_neighbors, extract_czs, extract_rzs, get_all_cnot_operations, get_cnot_row_operations, get_frontier_gadget_dict, init_frontier, get_neighbors_of_frontier, update_graph_for_frontier_neighbor_in_end, update_graph_with_cnots
+from pyzx.heuristics.extraction.extraction_base import MCP, add_gate_to_circuit, apply_cnots_to_circuit, get_all_cnot_operations, get_cnot_row_operations, get_frontier_gadget_dict, init_frontier, get_neighbors_of_frontier, update_graph_for_frontier_neighbor_in_end, apply_gates_to_circuit
 from pyzx.heuristics.extraction.mapper import gate_mapper, get_circuit_from_mapper
 from pyzx.heuristics.extraction.rerouting import build_connection_from_architecture
 from pyzx.heuristics.tools import insert_identity
@@ -72,7 +72,10 @@ def mcp_aware_extract(
     frontier = init_frontier(graph, circuit)
 
     if architecture:
-        architecture_copy = Architecture(name=architecture.name, coupling_graph=architecture.graph.copy(), qubit_map=list(range(len(frontier))))
+        if mapper:
+            _, architecture_copy = get_circuit_from_mapper(mapper, get_exact_phases=False)
+        else:
+            architecture_copy = Architecture(name=architecture.name, coupling_graph=architecture.graph.copy(), qubit_map=list(range(len(frontier))))
     else:
         architecture_copy = None
     
@@ -81,16 +84,15 @@ def mcp_aware_extract(
     while True:
 
         #CZ extraction + MCP extraction
+        #TODO: Change to return a list of gates instead of changing the circuit
         cz_gates = extract_czs(graph, frontier, circuit, None, cz_optimize)
         mcp_gates = extract_mcp(graph, frontier, circuit, None, allow_insertions)
         #Phase + Hadamard extraction
         rz_gates = extract_rzs(graph, frontier, circuit)
 
         if use_gate_mapping and len(circuit.data) > 0:
-            gate_names = [f"{gate[0].name}: {gate[0].params}" for gate in circuit.data] 
             # If we have extracted some CZ gates, we need to add them to the circuit
             architecture_copy, circuit_index = gate_mapper(mapper, circuit)
-
             circuit = QuantumCircuit(len(graph.inputs()))
 
 
@@ -113,7 +115,7 @@ def mcp_aware_extract(
                     # import pdb
                     # pdb.set_trace()
             else:
-                graph, frontier, frontier_neighbors, circuit, architecture_new = update_graph_with_cnots(graph, circuit, mapper, frontier, frontier_neighbors, rerouted_cnot_list)
+                graph, frontier, frontier_neighbors, circuit, architecture_new = apply_gates_to_circuit(graph, circuit, mapper, frontier, frontier_neighbors, rerouted_cnot_list, apply_gate_function=apply_cnots_to_circuit)
                 if architecture_new:
                     architecture_copy = architecture_new
                     
@@ -304,7 +306,104 @@ def extract_mcp(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|Q
         return False
 
 
+def extract_czs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|QuantumCircuit, architecture:Architecture, optimize: bool = False):
+    """Extracts connected frontier spiders as controlled Z gates and updates the diagram"""
+    if optimize:
+        #TODO: this might need to be changed for all types of gadgets
+        optimize_czs_in_frontier(g, frontier)
+    change = False
+    for qubit, v in frontier.items():
+        for w in set(g.neighbors(v)).intersection(set(frontier.values())):
+            g.remove_edge(g.edge(v,w))
+            gate = CZ(qubit, list(frontier.keys())[list(frontier.values()).index(w)])
+            if architecture:
+                rerouted_gates = build_connection_from_architecture(architecture, gate)
+                for rerouted_gate in rerouted_gates:
+                    add_gate_to_circuit(circuit, rerouted_gate)
+            else:
+                add_gate_to_circuit(circuit, gate)
+            change = True
+    return change
 
+
+def extract_rzs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|QuantumCircuit, inverse: bool = False):
+    """Extracts phases of frontier spiders as ZPhase gates and updates the diagram"""
+    start = list(g.inputs()) if not inverse else list(g.outputs())
+    phase_change = False
+    
+    for qubit in list(frontier.keys()):
+        while True:
+            boundary = False
+            v = frontier[qubit]
+            phase = g.phase(v)
+            if phase != 0:
+                g.set_phase(v,0)
+                gate = ZPhase(qubit, phase)
+            else:
+                neighbors = [neighbor for neighbor in g.neighbors(v) if neighbor not in start]
+                if len(neighbors) != 1:
+                    break
+
+                if g.type(neighbors[0]) == VertexType.BOUNDARY:
+                    boundary = True
+                    if g.edge_type(g.edge(v,neighbors[0])) == EdgeType.HADAMARD:
+                        gate = HAD(qubit)
+                    else:
+                        gate = None
+
+                                    
+                    g.add_edge(g.edge(start[qubit],neighbors[0]))
+                    del frontier[qubit]
+                else:
+                    frontier[qubit] = neighbors[0]
+                    gate = HAD(qubit)
+
+                    first_start = [neighbor for neighbor in g.neighbors(v) if neighbor in start]
+                    g.add_edge(g.edge(first_start[0], neighbors[0]))
+                    
+                    print("Simple vertex")
+                                
+                g.remove_vertex(v)
+
+            
+            if gate:
+                add_gate_to_circuit(circuit, gate)
+                phase_change = True
+
+            if boundary:
+                break
+
+    return phase_change
+
+
+def optimize_czs_in_frontier(g: BaseGraph, frontier: Dict[int, VT]):
+    """optimizes czs in a frontier by applying local complementations on phase gadgets so that the number of wires between frontiers decreases
+    effect on overall runtime relatively small yet."""
+    gadget_dict = get_frontier_gadget_dict(g, frontier)
+    for degree in sorted(gadget_dict.keys()):
+        for gadget_root, gadget_top, gadget_neighbors in gadget_dict[degree]:
+            if g.subgraph_from_vertices(gadget_neighbors).num_edges() > len(gadget_neighbors)*(len(gadget_neighbors)-1)/4:
+                #lcomp removes more edges in the frontier set than it creates
+                # print("complemented away czs")
+                complement_neighbors(g, list(gadget_neighbors))
+                for neighbor in gadget_neighbors:
+                    g.set_phase(neighbor, g.phase(neighbor)+Fraction(1,2))
+                g.set_phase(gadget_top, g.phase(gadget_top)-Fraction(1,2))
+
+
+def complement_neighbors(g: BaseGraph, vn: List[VT]):
+    """complements connections between a set of vertices, i.e. everything connected gets disconnected and vice versa"""
+    vn.sort()
+    for n in vn:
+        # flip edges
+        for n2 in vn[vn.index(n)+1:]:
+            if g.connected(n,n2):
+                g.remove_edge(g.edge(n,n2))
+            else:
+                g.add_edge(g.edge(n,n2), EdgeType.HADAMARD)
+
+
+#TODO: this should be in extraction_base.py, but pivot_mcp and lcomp_mcp should be replaced with normal lcomp and pivot
 def eliminate_yz_spider(g: BaseGraph[VT,ET], frontier: Dict[int,VT], frontier_neighbors: Set, circuit: Circuit|QuantumCircuit, inverse: bool = False) -> bool:
     """Finds a YZ measured spider which is connected to a spider in frontier and applies a pivot on them. 
     By that, the YZ spider transforms to a XY spider"""

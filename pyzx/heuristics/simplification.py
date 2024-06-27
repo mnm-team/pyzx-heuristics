@@ -51,6 +51,16 @@ def is_vertex_next_to_boundary(graph, vertex):
     return False
 
 def check_lcomp_match(graph, vertex, check_for_unfusions=True, check_for_xz_phase_gadgets=False) -> Tuple[Tuple[VT], List[MatchLcompHeuristicType]] | None:
+    """
+    Check if a local complementation match is possible for a given vertex in a graph.
+    
+    Parameters:
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        vertex (VT): The vertex to check.
+        check_for_unfusions (bool): Whether to include matches with neighbor unfusions.
+        check_for_xz_phase_gadgets (bool): Whether to include matches with xz phase gadgets.
+    """
+    
     vertex_types = graph.types()
 
     current_vertex_type = vertex_types[vertex]
@@ -77,6 +87,7 @@ def check_lcomp_match(graph, vertex, check_for_unfusions=True, check_for_xz_phas
     if is_already_gadget and needs_gadget: return None
     boundary_count = len(boundary_neighbours)
 
+    # TODO: Check if it is okay to allow more than one boundary
     if boundary_count > 1: return None
 
     if check_for_xz_phase_gadgets:
@@ -102,7 +113,15 @@ def check_lcomp_match(graph, vertex, check_for_unfusions=True, check_for_xz_phas
     return None
 
 def check_pivot_match(graph, edge, check_for_unfusions=True, check_for_phase_gadgets=True) -> Tuple[Tuple[VT, VT], List[MatchPivotHeuristicType]] | None:
-
+    """
+    Check if a pivot match is possible for a given edge in a graph.
+    
+    Parameters:
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        edge (ET): The edge to check.
+        check_for_unfusions (bool): Whether to include matches with neighbor unfusions.
+        check_for_phase_gadgets (bool): Whether to include matches with xy phase gadgets.
+    """
     vertex_types = graph.types()
     if graph.edge_type(edge) != EdgeType.HADAMARD: return None
 
@@ -268,6 +287,18 @@ def update_lcomp_matches(
         check_for_unfusions=True,
         check_for_xz_phase_gadgets=True
         ) -> Dict[Tuple[VT], List[MatchLcompHeuristicType]]:
+    """
+    Updates the dict of local complement matches after a local complementation has been applied.
+    
+    Parameters:
+        graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+        vertex_neighbors (List[VT]): The neighbors of the vertex where the local complementation was applied
+        removed_vertices (Tuple[VT]): The vertices that were removed by the local complementation
+        lcomp_matches (Dict[Tuple[VT], List[MatchLcompHeuristicType]]): The current dict of local complement matches
+        neighbors_of_neighbors (Set[VT]): The set of neighbors of neighbors of the vertex where the local complementation was applied
+        check_for_unfusions (bool): whether to check for unfusions.
+        check_for_xz_phase_gadgets (bool): whether to check for xz phase gadgets.
+    """
     
     # Iterate over the current local complement matches
     lcomp_matches_copy = lcomp_matches.copy()
@@ -322,7 +353,18 @@ def update_pivot_matches(
         check_for_unfusions=True,
         check_for_phase_gadgets=True
         ) -> Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]:
+    """
+    Updates the dict of pivot matches after a pivot has been applied.
     
+    Parameters:
+        graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+        vertex_neighbors (List[VT]): The neighbors of the vertex where the pivot was applied
+        removed_vertices (Tuple[VT]): The vertices that were removed by the pivot
+        pivot_matches (Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]): The current dict of pivot matches
+        neighbors_of_neighbors (Set[VT]): The set of neighbors of neighbors of the vertex where the pivot was applied
+        check_for_unfusions (bool): whether to check for unfusions.
+        check_for_phase_gadgets (bool): whether to check for yz phase gadgets.
+    """
     pivot_matches_copy = pivot_matches.copy()
     keys_to_remove = set()
 
@@ -380,15 +422,15 @@ def update_matches(
     Updates the dict of local complement and pivot matches after a local complementation or pivot has been applied.
 
     Parameters:
-    graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
-    vertex_neighbors (List[VT]): The neighbors of the vertex where the local complementation or pivot was applied
-    removed_vertices (Tuple[VT]): The vertices that were removed by the local complementation or pivot
-    lcomp_matches (Dict[Tuple[VT], List[MatchLcompHeuristicType]]): The current dict of local complement matches
-    pivot_matches (Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]): The current dict of pivot matches
-    check_for_unfusions (bool): whether to check for unfusions.
-    check_for_yz_phase_gadgets (bool): whether to check for phase gadgets in pivoting.
-    check_for_xz_phase_gadgets (bool): whether to check for phase gadgets in local complementation.
-    max_vertex_index (int, optional): The maximum vertex to consider for matches.
+        graph (BaseGraph[VT,ET]): An instance of a Graph, i.e. ZX-diagram
+        vertex_neighbors (List[VT]): The neighbors of the vertex where the local complementation or pivot was applied
+        removed_vertices (Tuple[VT]): The vertices that were removed by the local complementation or pivot
+        lcomp_matches (Dict[Tuple[VT], List[MatchLcompHeuristicType]]): The current dict of local complement matches
+        pivot_matches (Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]): The current dict of pivot matches
+        check_for_unfusions (bool): whether to check for unfusions.
+        check_for_yz_phase_gadgets (bool): whether to check for yz phase gadgets in pivoting.
+        check_for_xz_phase_gadgets (bool): whether to check for xz phase gadgets in local complementation.
+        max_vertex_index (int, optional): The maximum vertex to consider for matches.
 
     Returns:
     Tuple[Dict[Tuple[VT], List[MatchLcompHeuristicType]], Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]]: The updated dictonaries of local complement and pivot matches.
@@ -441,12 +483,12 @@ def get_possible_gflow_preserving_unfusion_neighbours(graph: BaseGraph[VT,ET], c
     Only neighbors with 2 or less neighbors are considered to preserve the G-flow.
 
     Parameters:
-    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
-    current_vertex (VT): The vertex to find possible unfusion neighbors for.
-    exclude_vertex (VT, optional): A vertex to exclude from the possible unfusion neighbors.
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        current_vertex (VT): The vertex to find possible unfusion neighbors for.
+        exclude_vertex (VT, optional): A vertex to exclude from the possible unfusion neighbors.
 
     Returns:
-    list: A list of vertices that are possible neighbors for unfusion.
+        list: A list of vertices that are possible neighbors for unfusion.
     """
     
     possible_unfusion_neighbours = set()
@@ -467,12 +509,12 @@ def get_all_possible_unfusion_neighbours(graph: BaseGraph[VT,ET], current_vertex
     Get all the possible neighbors for unfusion of a given vertex in a graph.
 
     Parameters:
-    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
-    current_vertex (VT): The vertex to find possible unfusion neighbors for.
-    exclude_vertex (VT, optional): A vertex to exclude from the possible unfusion neighbors.
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        current_vertex (VT): The vertex to find possible unfusion neighbors for.
+        exclude_vertex (VT, optional): A vertex to exclude from the possible unfusion neighbors.
 
     Returns:
-    list: A list of vertices that are possible neighbors for unfusion.
+        list: A list of vertices that are possible neighbors for unfusion.
     """
     possible_unfusion_neighbours = set(neighbor for neighbor in graph.neighbors(current_vertex) if graph.type(neighbor) == VertexType.Z)
 
@@ -487,13 +529,13 @@ def unfuse_to_neighbor(graph, current_vertex, neighbor_vertex, desired_phase):
     Unfuse a vertex to its neighbor in a graph.
 
     Parameters:
-    graph (BaseGraph): The graph to perform the operation on.
-    current_vertex (VT): The vertex to unfuse.
-    neighbor_vertex (VT): The neighbor vertex to unfuse to.
-    desired_phase (float): The desired phase for the unfused vertex.
+        graph (BaseGraph): The graph to perform the operation on.
+        current_vertex (VT): The vertex to unfuse.
+        neighbor_vertex (VT): The neighbor vertex to unfuse to.
+        desired_phase (float): The desired phase for the unfused vertex.
 
     Returns:
-    tuple: A tuple containing the phaseless spider and the phase spider.
+        tuple: A tuple containing the phaseless spider and the phase spider.
     """
     new_phase = split_phases(graph.phase(current_vertex), desired_phase)
 
@@ -530,11 +572,11 @@ def check_for_boundaries(graph: BaseGraph[VT,ET], match)-> list | None:
     Check if the match contains more than one boundary.
 
     Parameters:
-    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
-    match (tuple): The match to check.
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        match (tuple): The match to check.
 
     Returns:
-    list | None: A list of vertex boundaries. None if the match contains more than one boundary.
+        list | None: A list of vertex boundaries. None if the match contains more than one boundary.
     """
 
     match_key, match_value = match
@@ -572,13 +614,13 @@ def apply_unfusion(graph: BaseGraph[VT,ET], unfusion_neighbors: Dict[VT, VT], de
     If a flow function is provided, the flow of the graph is calculated for each edge unfused.
 
     Parameters:
-    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
-    unfusion_neighbors (dict): The neighbors to unfuse to.
-    desired_phase (Fraction): The desired phase for the unfused vertex.
-    flow_function (optinal[Callable]): A function to calculate the flow of the graph for each edge unfused.
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        unfusion_neighbors (dict): The neighbors to unfuse to.
+        desired_phase (Fraction): The desired phase for the unfused vertex.
+        flow_function (optinal[Callable]): A function to calculate the flow of the graph for each edge unfused.
 
     Returns:
-    Tuple[Tuple[Tuple[VT, ...], Dict], Dict[str, float]] | None: A tuple containing the added unfusion vertices, a dictionary storing the flow preserving attribute of each edge and a dictionary for the time of each processing step. None if no unfusion is possible.
+        Tuple[Tuple[Tuple[VT, ...], Dict], Dict[str, float]] | None: A tuple containing the added unfusion vertices, a dictionary storing the flow preserving attribute of each edge and a dictionary for the time of each processing step. None if no unfusion is possible.
     """
 
     if all(neighbor is None for neighbor in unfusion_neighbors.values()):
@@ -612,12 +654,12 @@ def apply_pivot(graph: BaseGraph[VT,ET], match: Tuple[Tuple[VT, VT], MatchPivotH
     If a flow function is provided, the flow of the graph is calculated for each edge unfused.
 
     Parameters:
-    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
-    match (tuple): The match to apply the operation to.
-    flow_function (optinal[Callable]): A function to calculate the flow of the graph for each edge unfused.
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        match (tuple): The match to apply the operation to.
+        flow_function (optinal[Callable]): A function to calculate the flow of the graph for each edge unfused.
 
     Returns:
-    Tuple[Tuple[Tuple[VT, ...], Dict], Dict[str, float]] | None: A tuple containing the added unfusion vertices, a dictionary storing the flow preserving attribute of each edge and a dictionary for the time of each processing step. None if no pivot is possible.
+        Tuple[Tuple[Tuple[VT, ...], Dict], Dict[str, float]] | None: A tuple containing the added unfusion vertices, a dictionary storing the flow preserving attribute of each edge and a dictionary for the time of each processing step. None if no pivot is possible.
     """
     vertex_bounderies = check_for_boundaries(graph, match)
     if vertex_bounderies is None:
@@ -652,12 +694,12 @@ def apply_lcomp(graph: BaseGraph[VT,ET], match: Tuple[Tuple[VT,], MatchLcompHeur
     If a flow function is provided, the flow of the graph is calculated for each edge unfused.
 
     Parameters:
-    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
-    match (tuple): The match to apply the operation to.
-    flow_function (optinal[Callable]): A function to calculate the flow of the graph for each edge unfused.
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        match (tuple): The match to apply the operation to.
+        flow_function (optinal[Callable]): A function to calculate the flow of the graph for each edge unfused.
 
     Returns:
-    Tuple[Tuple[Tuple[VT, ...], Dict], Dict[str, float]] | None: A tuple containing the added unfusion vertices, a dictionary storing the flow preserving attribute of each edge and a dictionary for the time of each processing step. None if no local complementation is possible.
+        Tuple[Tuple[Tuple[VT, ...], Dict], Dict[str, float]] | None: A tuple containing the added unfusion vertices, a dictionary storing the flow preserving attribute of each edge and a dictionary for the time of each processing step. None if no local complementation is possible.
     """
 
     match_key, match_value = match
@@ -693,10 +735,10 @@ def get_match_type(match: Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchP
     Get the type of a match.
 
     Parameters:
-    match (tuple): The match to get the type of.
+        match (tuple): The match to get the type of.
 
     Returns:
-    str: The type of the match.
+        MatchType: The type of the match.
     """
     match_key, _ = match
 
@@ -712,10 +754,10 @@ def is_match_unfusing(match: Tuple[Tuple[VT, ...], MatchLcompHeuristicType | Mat
     Check if a match is unfusing, but not a phase gadget.
 
     Parameters:
-    match (tuple): The match to check.
+        match (tuple): The match to check.
 
     Returns:
-    bool: True if the match is unfusing, False otherwise.
+        bool: True if the match is unfusing, False otherwise.
     """
     _, match_value = match
 
@@ -730,10 +772,10 @@ def is_match_phase_gadget(match: Tuple[Tuple[VT, ...], MatchLcompHeuristicType |
     Check if a match is unfusing to a phase gadget.
 
     Parameters:
-    match (tuple): The match to check.
+        match (tuple): The match to check.
 
     Returns:
-    bool: True if the match is unfusing to a phase gadget, False otherwise.
+        bool: True if the match is unfusing to a phase gadget, False otherwise.
     """
     _, match_value = match
 
@@ -748,10 +790,10 @@ def is_match_boundary(graph:BaseGraph, match: Tuple[Tuple[VT, ...], MatchLcompHe
     Check if a match is boundary.
 
     Parameters:
-    match (tuple): The match to check.
+        match (tuple): The match to check.
     
     Returns:
-    bool: True if the match is boundary, False otherwise.
+        bool: True if the match is boundary, False otherwise.
     """
     match_key, _ = match
 
@@ -766,10 +808,10 @@ def get_gadgets_in_graph(graph: BaseGraph[VT,ET]) -> Dict[VT, VT]:
     Get all the phase gadgets in a graph.
 
     Parameters:
-    graph (BaseGraph[VT,ET]): The graph to perform the operation on.
+        graph (BaseGraph[VT,ET]): The graph to perform the operation on.
 
     Returns:
-    dict: A dictionary of phase gadgets.
+        dict: A dictionary of phase gadgets.
     """
     gadgets = {}
     for vertex in graph.vertex_set():
@@ -842,8 +884,10 @@ class WireReducer:
         self._lookup_flow_for_unfusion: Dict[Tuple[VT, VT], bool] = {}
         self._use_lookup_flow_for_unfusion = False
         self._possibly_non_flow_preserving_matches = []
-        self._apply_all_lookahead_matches = True
         self._la_current_match_list = []
+
+        #TODO: check if this is better or worse
+        self._apply_all_lookahead_matches = True
 
         # For logging purposes
         self._rule_application_count = 0
@@ -898,6 +942,13 @@ class WireReducer:
 
 
     def greedy_wire_reduce(self):
+        """
+        Reduces the graph using the greedy algorithm. The algorithm will apply the best match at each depth until no more matches are found.
+        Main entry point for the greedy algorithm.
+
+        Returns:
+            Tuple[float, List[Tuple[Tuple[VT, ...], Dict]]]: The total reduction and the list of applied matches.
+        """
         self.has_changes_occurred = True
 
         local_complement_matches = lcomp_matcher(self.graph, check_for_unfusions=self.use_neighbor_unfusion, check_for_xz_phase_gadgets=self.use_xz_phase_gadgets)
@@ -923,6 +974,13 @@ class WireReducer:
         return sum(self._reduction_per_match), self._applied_matches
     
     def random_wire_reduce(self):
+        """
+        Reduces the graph using the random algorithm. The algorithm will apply a random match at each depth until no more matches are found.
+        Main entry point for the random algorithm.
+        
+        Returns:
+            Tuple[float, List[Tuple[Tuple[VT, ...], Dict]]]: The total reduction and the list of applied matches.
+        """
         self.has_changes_occurred = True
 
         local_complement_matches = lcomp_matcher(self.graph, check_for_unfusions=self.use_neighbor_unfusion, check_for_xz_phase_gadgets=self.use_xz_phase_gadgets)
@@ -1037,11 +1095,11 @@ class WireReducer:
         Excludes the possibly non-flow-preserving matches.
         
         Parameters:
-        n (int): The number of matches to return.
-        match_dict (Dict[Tuple[VT, ...], List[MatchLcompHeuristicType | MatchPivotHeuristicType]]): A dict of matches
+            n (int): The number of matches to return.
+            match_dict (Dict[Tuple[VT, ...], List[MatchLcompHeuristicType | MatchPivotHeuristicType]]): A dict of matches
         
         Returns:
-        List[Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]]: A list of the best n matches
+            List[Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]]: A list of the best n matches
         """
         
         if len(match_dict) == 0:
@@ -1075,12 +1133,12 @@ class WireReducer:
         Get n random matches out of the given matches.
         
         Parameters:
-        n (int): The number of matches to return.
-        match_dict (Dict[Tuple[VT, ...], List[MatchLcompHeuristicType | MatchPivotHeuristicType]]): A dict of matches
-        matches_to_exclude (List[Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]], optional): A dict of matches to exclude from the random matches
+            n (int): The number of matches to return.
+            match_dict (Dict[Tuple[VT, ...], List[MatchLcompHeuristicType | MatchPivotHeuristicType]]): A dict of matches
+            matches_to_exclude (List[Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]], optional): A dict of matches to exclude from the random matches
         
         Returns:
-        List[Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]]: A list of n random matches
+            List[Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]]: A list of n random matches
         """
             
         if len(match_dict) == 0:
@@ -1114,12 +1172,12 @@ class WireReducer:
         Possibly non-flow-preserving matches are excluded from the best matches, but can still be inculed in the random matches.
 
         Parameters: 
-        n (int): The number of matches to return.
-        lcomp_matches (Dict[Tuple[VT], List[MatchLcompHeuristicType]]): A dict of matches for local complementation
-        pivot_matches (Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]): A dict of matches for pivoting
+            n (int): The number of matches to return.
+            lcomp_matches (Dict[Tuple[VT], List[MatchLcompHeuristicType]]): A dict of matches for local complementation
+            pivot_matches (Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]): A dict of matches for pivoting
 
         Returns:
-        List[Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]]: A list of the best and random matches
+            List[Tuple[Tuple[VT, ...], MatchLcompHeuristicType | MatchPivotHeuristicType]]: A list of the best and random matches
         """
         if len(lcomp_matches) == 0 and len(pivot_matches) == 0:
             return None
@@ -1203,13 +1261,13 @@ class WireReducer:
         Checks if the match is flow-preserving.
 
         Parameters:
-        graph (BaseGraph): The graph to check.
-        match (Tuple): The match to check.
-        previous_matches (list[Tuple]): The list of matches that have been applied in the current lookahead.
-        edge_flow (Dict): The flow of the graph.
+            graph (BaseGraph): The graph to check.
+            match (Tuple): The match to check.
+            previous_matches (list[Tuple]): The list of matches that have been applied in the current lookahead.
+            edge_flow (Dict): The flow of the graph.
 
         Returns:
-        bool: True if the match is flow-preserving, False otherwise.
+            bool: True if the match is flow-preserving, False otherwise.
         """
         # An unfusion was applied (but not to a phase gadget)
         match_contains_unfusion = is_match_unfusing(match)
@@ -1271,12 +1329,12 @@ class WireReducer:
         Applies the given match to the graph and updates the dicts of local complement and pivot matches.
 
         Parameters:
-        graph (BaseGraph[VT, ET]): The graph to apply the match to.
-        match (Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]): The match to apply.
-        skip_flow_calculation (bool, optional): Whether to skip the flow calculation. Defaults to False.
+            graph (BaseGraph[VT, ET]): The graph to apply the match to.
+            match (Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]): The match to apply.
+            skip_flow_calculation (bool, optional): Whether to skip the flow calculation. Defaults to False.
 
         Returns:
-        Tuple[List[VT], Tuple[VT, ...]] | None: The neighbors of the matched vertices and the removed vertices. None if the match is not flow-preserving.
+            Tuple[List[VT], Tuple[VT, ...]] | None: The neighbors of the matched vertices and the removed vertices. None if the match is not flow-preserving.
         """
         match_key, match_value = match
         vertex_neighbors = set()
@@ -1398,21 +1456,22 @@ class WireReducer:
     ) -> Dict[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType] | None:
         """
         Perform a depth-first search on the graph to find the best result at a specific depth.
+        Main method for the greedy optimization algorithm.
         
         This function recursively explores the graph using depth-first search. When the specified depth (lookahead) is reached,
         it applies the best match (either a local complement or a pivot) to the graph and updates the best result found so far.
         If 'full_subgraphs' is False, the search progressively narrows down the percentage of top paths it considers as it delves deeper, meaning it doesn't explore every single path to the maximum lookahead depth.
         
         Parameters:
-        graph (BaseGraph[VT, ET]): The graph to search for matches in.
-        lcomp_matches (Dict[Tuple[VT], List[MatchLcompHeuristicType]]): Dictionary of matches based on lcomp heuristic.
-        pivot_matches (Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]): Dictionary of matches based on pivot heuristic.
-        get_matches_method (Callable): The method to get the matches.
-        apply_match_method (Callable): The method to apply the matches.
-        depth (int): The current depth of the search.
-        best_result (List[Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]] | None): The best result found so far.
-        current_match_dict (List[Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]]): The current matches found so far.
-        full_subgraphs (bool): Whether to consider full subgraphs or not.
+            graph (BaseGraph[VT, ET]): The graph to search for matches in.
+            lcomp_matches (Dict[Tuple[VT], List[MatchLcompHeuristicType]]): Dictionary of matches based on lcomp heuristic.
+            pivot_matches (Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]]): Dictionary of matches based on pivot heuristic.
+            get_matches_method (Callable): The method to get the matches.
+            apply_match_method (Callable): The method to apply the matches.
+            depth (int): The current depth of the search.
+            best_result (List[Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]] | None): The best result found so far.
+            current_match_dict (List[Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType]]): The current matches found so far.
+            full_subgraphs (bool): Whether to consider full subgraphs or not.
         """
 
         if depth == self.lookahead:
@@ -1584,6 +1643,8 @@ class WireReducer:
 
         stop_search = False
 
+
+        #TODO: make this a class variable
         num_matches = 10
         if len(self._reduction_per_match) >= num_matches:
             last_matches = self._reduction_per_match[-num_matches:]
@@ -1802,7 +1863,7 @@ def sim_annealing_wire_reduce(
 
 
 
-def _get_best_match(
+def _get_best_match_for_sim(
         lcomp_matches: Dict[Tuple[VT], List[MatchLcompHeuristicType]], 
         pivot_matches: Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]], 
         max_vertex_index=None, 
@@ -1831,7 +1892,7 @@ def _get_best_match(
 
     return best_matches_heap[0] if best_matches_heap else None
 
-def _get_random_match(
+def _get_random_match_for_sim(
         lcomp_matches: Dict[Tuple[VT], List[MatchLcompHeuristicType]], 
         pivot_matches: Dict[Tuple[VT,VT], List[MatchPivotHeuristicType]], 
         max_vertex_index=None, 
@@ -1859,7 +1920,7 @@ def _get_random_match(
 
     return random_match if random_match else None
 
-def _apply_match(
+def _apply_match_for_sim(
         graph: BaseGraph[VT, ET], 
         match: Tuple[Tuple, MatchLcompHeuristicType | MatchPivotHeuristicType], 
         flow_function: FilterFlowFunc = FilterFlowFunc.NONE,
@@ -1953,7 +2014,7 @@ def _sim_annealing_reduce(
     while temperature > min_temperature:
         iteration_count += 1
 
-        match = _get_best_match(local_complement_matches, pivot_matches, max_vertex_index, threshold)
+        match = _get_best_match_for_sim(local_complement_matches, pivot_matches, max_vertex_index, threshold)
         if match is None:
             temperature = 0
             break
@@ -1964,7 +2025,7 @@ def _sim_annealing_reduce(
                 backtrack = False
                 continue
             else:
-                match = _get_random_match(local_complement_matches, pivot_matches, max_vertex_index, threshold)
+                match = _get_random_match_for_sim(local_complement_matches, pivot_matches, max_vertex_index, threshold)
                 backtrack = True
 
         if match is None:
@@ -1978,7 +2039,7 @@ def _sim_annealing_reduce(
         if match_value[0] > 0 or acceptance_probability > random.random():
             
             graph_copy = graph.copy()
-            match_result = _apply_match(graph_copy, match, flow_function=flow_function)
+            match_result = _apply_match_for_sim(graph_copy, match, flow_function=flow_function)
             if match_result is None:
                 continue
             

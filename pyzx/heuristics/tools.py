@@ -3,12 +3,11 @@ from pyzx.graph.base import BaseGraph
 from pyzx.utils import VertexType, EdgeType
 
 
-'''
-When unfusing a spider into two spiders this returns phase for second spider if the first spider has to get a certain desired phase like pi/2
-E.g. split_phases(7pi/4,pi/2) returns 5pi/4
-'''
-
 def split_phases(orig_phase: Fraction, desired_phase: Fraction):
+    '''
+    When unfusing a spider into two spiders this returns phase for second spider if the first spider has to get a certain desired phase like pi/2
+    E.g. split_phases(7pi/4,pi/2) returns 5pi/4
+    '''
     extend_denom = max(orig_phase.denominator,desired_phase.denominator)
     orig_phase_n = int(orig_phase.numerator*(extend_denom/orig_phase.denominator))
     desired_phase_n = int(desired_phase.numerator*(extend_denom/desired_phase.denominator))

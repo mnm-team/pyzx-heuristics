@@ -11,15 +11,13 @@ from qiskit import QuantumCircuit
 
 from pyzx.circuit import Circuit
 from pyzx.circuit.gates import CNOT, CZ, HAD, Gate, ZPhase
-from pyzx.drawing import draw_matplotlib
 from pyzx.extract import column_optimal_swap, connectivity_from_biadj, filter_duplicate_cnots, xor_rows
 from pyzx.graph.base import ET, VT, BaseGraph
-from pyzx.heuristics.extraction.mapper import gate_mapper, get_circuit_from_mapper
+from pyzx.heuristics.extraction.mapper import gate_mapper
 from pyzx.heuristics.extraction.rerouting import ReroutedGate, build_connection_from_architecture
-from pyzx.linalg import Z2, CNOTMaker, Mat2
+from pyzx.linalg import Z2, Mat2
 from pyzx.routing.architecture import Architecture
-from pyzx.routing.cnot_mapper import ElimMode, gauss
-from pyzx.heuristics.tools import insert_identity
+from pyzx.routing.cnot_mapper import ElimMode
 from pyzx.simplify import apply_rule, full_reduce, pivot, lcomp_with_boundaries
 from pyzx.utils import EdgeType, FractionLike, VertexType, phase_is_true_clifford, toggle_edge
 
@@ -65,8 +63,11 @@ class MCP(Gate):
             return name+phase+" "+control_string+" q["+str(self.target)+"];"
         
 
+def add_gate_to_circuit(circuit: Circuit|QuantumCircuit, gate:Gate) -> None:
+    """Adds a gate to a circuit. If the circuit is a QuantumCircuit, the gate is added using the Qiskit API.
+    If the circuit is a Circuit, the gate is added using the PyZX API."""
 
-def add_gate_to_circuit(circuit: Circuit|QuantumCircuit, gate:Gate):
+    #TODO: this should be implemented in the Gate class
     if isinstance(circuit, Circuit):
         circuit.add_gate(gate)
     else:
@@ -161,6 +162,7 @@ def add_gate_to_circuit(circuit: Circuit|QuantumCircuit, gate:Gate):
 
 
 def get_full_graph_from_partial_graph_and_circuit(partial_graph: BaseGraph, partial_circuit: Circuit, fr:bool, inverse:bool=False) -> BaseGraph:
+    """Returns the full graph from a partial graph and a partial circuit. If fr is True, the full graph is fully reduced."""
 
     second_partial_graph = partial_circuit.to_graph()
     if inverse:
@@ -179,7 +181,10 @@ def get_full_graph_from_partial_graph_and_circuit(partial_graph: BaseGraph, part
 
 def bi_adj(g: BaseGraph[VT,ET], vs:List[VT], ws:List[VT]) -> Mat2:
     """Construct a biadjacency matrix between the supplied list of vertices
-    ``vs`` and ``ws``."""
+    ``vs`` and ``ws``.
+    
+    If ``vs`` has less elements than ``ws``, ``vs`` is padded with -1.
+    """
     vs_copy = vs.copy()
     for _ in range(len(ws)-len(vs)):
         vs_copy.append(-1)
@@ -225,19 +230,9 @@ def find_minimal_sums_with_architecture(m: Mat2, architecture:Architecture, resu
         combs = combs2
 
 
-def reorder_frontier(frontier: Dict[int, VT], architecture: Architecture) -> Dict[int, VT]:
-    """Reorders the frontier to match the architecture"""
-    new_frontier = {}
-    for qubit, vertex in frontier.items():
-        new_frontier[architecture.qubit_map[qubit]] = vertex
-    new_frontier = dict(sorted(new_frontier.items()))
-    return new_frontier
-
-
 def greedy_reduction_with_architecture(m: Mat2, architecture: Architecture) -> Optional[List[List[ReroutedGate]]]:
-    """Returns a list of tuples (r1,r2) that specify which row should be added to which other row
-    in order to reduce one row of m to only contain a single 1. 
-    Used in :func:`extract_circuit` and :func:`lookahead_extract_base`"""
+    """Returns a list of lists of CNOTs that reduce the matrix m to a matrix with only one 1 in at least one row.
+    The function uses a greedy algorithm to find the minimal sums of rows that can be added together to reduce the matrix."""
     indices_list_greedy_row_add = find_minimal_sums_with_architecture(m, architecture=None)
     if indices_list_greedy_row_add == []: return None
 
@@ -275,9 +270,8 @@ def greedy_reduction_with_architecture(m: Mat2, architecture: Architecture) -> O
     return row_add_results
 
 
-
 def get_best_cnot_configuration(rerouted_gate_list: List[List[ReroutedGate]], architecture: Architecture) -> List[ReroutedGate]:
-    """Given a list of lists of CNOTs, returns the list with the fewest CNOTs"""
+    """Given a list of lists of CNOTs, returns the list with the fewest CNOTs that are viable for the given architecture."""
     if not rerouted_gate_list:
         return []
     
@@ -298,98 +292,21 @@ def get_best_cnot_configuration(rerouted_gate_list: List[List[ReroutedGate]], ar
 
 
 
+def init_frontier(g: BaseGraph[VT, ET], circuit: Circuit|QuantumCircuit, inverse:bool=False) -> Dict[int,VT]:
+    """Inits the frontier of a ZX-diagram with the spiders adjacent to the inputs. Extracts Hadamard wires between inputs and frontier"""
+    frontier: Dict[int,VT] = dict()
+    start = list(g.inputs()) if not inverse else list(g.outputs())
+    end = list(g.outputs()) if not inverse else list(g.inputs())
 
-def rearrange_columns_for_architecture(m: Mat2, architecture: Architecture, swap_operations: Dict[int, int] = {}, col_index: int = 0) -> Tuple[dict, Mat2] | None:
-    """
-    Rearranges the columns of a matrix to match the qubit mapping of an architecture.
-    The function recursively tries to swap columns to match the architecture.
-    If a suitable column is found, the function is called recursively for the next column.
-    If no suitable column is found, the function returns the matrix as is.
+    for qubit, start_vertex in enumerate(start):
+        v = list(g.neighbors(start_vertex))[0]
+        if not v in end:
+            frontier[qubit] = v
+            if g.edge_type(g.edge(v,start_vertex)) == EdgeType.HADAMARD:
+                add_gate_to_circuit(circuit, HAD(qubit))
+                g.set_edge_type(g.edge(v,start_vertex),EdgeType.SIMPLE)
     
-    Args:
-        m: The matrix to be rearranged
-        architecture: The architecture to match the columns to
-        swap_operations: A dictionary containing the swap operations that have been performed so far
-        col_index: The index of the column to start the rearrangement from
-    
-    Returns:
-        A tuple containing the swap operations that have been performed and the rearranged matrix,
-        or None if no suitable column is found.
-    """
-    
-    #TODO: This is not enough. Steiner will edit columns, which will mess up the initial column swaps. Column swaps should try to consider steiner method.
-    # Create a copy of the matrix to avoid modifying the original
-    matrix = m.copy()
-    qubit_mapping = architecture.qubit_map
-
-    # Iterate over the columns
-    for c in range(col_index, matrix.cols()):
-        # Get the actual row indices for the current column where the value is 1
-        actual_indices = [qubit_mapping[r] for r in range(c, matrix.rows()) if matrix.data[r][c] == 1 or r == c]
-        actual_indices.sort()
-
-        if len(actual_indices) > 0:
-            # Check if the actual indices form a contiguous series
-            if actual_indices != list(range(min(actual_indices), max(actual_indices) + 1)):
-                # If not, find a column to swap with
-                for k in range(c + 1, matrix.cols()):
-                    # Get the actual row indices for the potential swap column
-                    swap_indices = [qubit_mapping[r] for r in range(c, matrix.rows()) if matrix.data[r][k] == 1 or r == c]
-                    swap_indices.sort()
-
-                    # Check if the swap indices form a contiguous series
-                    if swap_indices == list(range(min(swap_indices), max(swap_indices) + 1)):
-                        # If so, swap the columns
-                        matrix.col_swap(c, k)
-                        swap_operations[c] = k
-
-                        # Recursively call the function for the next column
-                        result = rearrange_columns_for_architecture(matrix, architecture, swap_operations.copy(), c + 1)
-                        if result is not None:
-                            return result
-
-                        # If the recursive call did not find a solution, undo the swap
-                        matrix.col_swap(c, k)
-                        del swap_operations[c]
-
-                # If no suitable column is found in the next columns, check the previous columns
-                if c not in swap_operations:
-                    for k in range(c - 1, -1, -1):
-                        # Get the actual row indices for the potential swap column
-                        swap_indices = [qubit_mapping[r] for r in range(c, matrix.rows()) if matrix.data[r][k] == 1 or r == c]
-                        swap_indices.sort()
-
-                        # Check if the swap indices form a contiguous series
-                        if swap_indices == list(range(min(swap_indices), max(swap_indices) + 1)):
-                            # If so, swap the columns
-                            matrix.col_swap(c, k)
-
-                            # Check if both columns are now correct
-                            actual_indices_after_swap = [qubit_mapping[r] for r in range(c, matrix.rows()) if matrix.data[r][c] == 1 or r == c]
-                            actual_indices_after_swap.sort()
-                            swap_indices_after_swap = [qubit_mapping[r] for r in range(k, matrix.rows()) if matrix.data[r][k] == 1 or r == k]
-                            swap_indices_after_swap.sort()
-
-                            if actual_indices_after_swap == list(range(min(actual_indices_after_swap), max(actual_indices_after_swap) + 1)) and swap_indices_after_swap == list(range(min(swap_indices_after_swap), max(swap_indices_after_swap) + 1)):
-                                # If both columns are correct, add the swap operation to the dictionary
-                                swap_operations[c] = k
-
-                                # Recursively call the function for the next column
-                                result = rearrange_columns_for_architecture(matrix, architecture, swap_operations.copy(), c + 1)
-                                if result is not None:
-                                    return result
-
-                                # If the recursive call did not find a solution, undo the swap
-                                del swap_operations[c]
-                                matrix.col_swap(c, k)
-                            else:
-                                matrix.col_swap(c, k)
-
-    # If no suitable column is found, return the matrix as is
-    if col_index == matrix.cols() - 1:
-        return swap_operations, matrix
-    else:
-        return None
+    return frontier
 
 
 def get_neighbors_of_frontier(
@@ -450,102 +367,75 @@ def update_graph_for_frontier_neighbor_in_end(
     return new_verticies
 
 
-def get_frontier_neighbors(g: BaseGraph, frontier: Dict[int, VT]):
-    """Given a graph and a frontier set, returns all (non-output) neighbors of the frontier as a set"""
-    res = set()
-    for v in frontier.values():
-        res.update(set(g.neighbors(v)))
-    return res.difference(set(g.outputs()))
 
 
 
-def remove_gadget(
-        g: BaseGraph[VT, ET], 
-        frontier: Dict[int, VT],
-        inverse: bool = False
-        ) -> bool:
-    """Removes a gadget that is attached to a frontier vertex. Returns True if such gadget was found, False otherwise"""
-    gadget_set = get_frontier_gadgets(g, frontier)
-    removed_gadget = False
-    start = g.inputs() if not inverse else g.outputs()
-    
-    for root, _ in gadget_set:
-        first_frontier_neighbor = [o for o in g.neighbors(root) if o in frontier.values()][0]
-        if phase_is_true_clifford(g.phase(root)):
-            apply_rule(g, lcomp_with_boundaries, [(root, list(g.neighbors(root)))])  # type: ignore
-        else:
-            qubit_for_vertex = list(frontier.keys())[list(frontier.values()).index(first_frontier_neighbor)]
-            apply_rule(g, pivot, [(root, first_frontier_neighbor, [], [o for o in g.neighbors(first_frontier_neighbor) if o in start])])  # type: ignore
-            
-            frontier[qubit_for_vertex] = root
-
-        removed_gadget = True
-        break
-    return removed_gadget
 
 
-def update_graph_with_cnots(graph:BaseGraph,
-                            circuit: Circuit|QuantumCircuit, 
+def apply_gates_to_circuit(graph:BaseGraph,
+                            circuit:Circuit|QuantumCircuit,
                             mapper, 
                             frontier:Dict[int, VT], 
                             frontier_neighbors:List[VT], 
-                            rerouted_cnot_list:List[List[ReroutedGate]],
-                            inverse:bool=False
+                            rerouted_gate_list:List[List[ReroutedGate]],
+                            apply_gate_function:Callable[[BaseGraph, Circuit|QuantumCircuit, Dict[int, VT], List[ReroutedGate], List[VT], bool], Circuit|QuantumCircuit],
+                            inverse:bool=False,
                             ) -> Tuple[BaseGraph, Dict[int, VT], List[VT], Circuit, Architecture|None]:
     
-    """Applies the CNOTs to the graph and circuit, updating the frontier and frontier neighbors as needed.
+    """Applies the Gates to the graph and circuit, updating the frontier and frontier neighbors as needed.
     Returns the updated graph, frontier, frontier neighbors, circuit, and architecture.
     If use_gate_mapping is True, the circuit is mapped to the architecture using the given mapper.
     If use_gate_mapping is False, the circuit is updated with the CNOTs directly.
     """
     
-    cnot_data = {"circuits": [], "graphs": [], "frontier": [], "neighbors": []}
-    additions = 0
-    copied_rerouted_cnot_list = copy.deepcopy(rerouted_cnot_list)
-    for index, cnot_list in enumerate(copied_rerouted_cnot_list):
+    gate_data = {"circuits": [], "graphs": [], "frontier": [], "neighbors": []}
+    gate_list_index = 0
+    while gate_list_index < len(rerouted_gate_list):
+        current_gate_list = rerouted_gate_list[gate_list_index]
         if mapper:
-            cnot_data = apply_cnot_operations_and_store_data(graph, frontier, frontier_neighbors, cnot_list, cnot_data, inverse=inverse)
-            # if cnot_list and any(rerouted_cnot.is_gate_rerouted() for rerouted_cnot in cnot_list):
-            #     basic_cnots = [ReroutedGate(rerouted_cnot.basic_gate.copy(), None) for rerouted_cnot in cnot_list]
-            #     rerouted_cnot_list.insert(index+additions, basic_cnots)
-            #     additions += 1
-            #     cnot_data = apply_cnot_operations_and_store_data(graph, frontier, frontier_neighbors, basic_cnots, cnot_data, inverse=inverse)
+            gate_data = apply_gate_operations_and_store_data(graph, frontier, frontier_neighbors, copy.deepcopy(current_gate_list), gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
+            if current_gate_list and any(rerouted_gate.is_gate_rerouted() for rerouted_gate in current_gate_list):
+                basic_gates = [ReroutedGate(rerouted_gate.basic_gate.copy(), None) for rerouted_gate in current_gate_list]
+                gate_list_index += 1
+                rerouted_gate_list.insert(gate_list_index, basic_gates)
+                gate_data = apply_gate_operations_and_store_data(graph, frontier, frontier_neighbors, basic_gates, gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
         else:
-            if len(rerouted_cnot_list) > 1:
-                raise ValueError("Multiple CNOTs not supported without gate mapping")
-            circuit = apply_cnots_to_circuit(graph, circuit, frontier, cnot_list, frontier_neighbors, inverse=inverse)
+            if len(rerouted_gate_list) > 1:
+                raise ValueError("Multiple Gatelists not supported without gate mapping")
+            circuit = apply_gate_function(graph, circuit, frontier, current_gate_list, frontier_neighbors, inverse=inverse)
+        gate_list_index += 1
     
     architecture_copy = None
     if mapper:
-        architecture_copy, circuit_index = gate_mapper(mapper, cnot_data["circuits"])
+        architecture_copy, circuit_index = gate_mapper(mapper, gate_data["circuits"])
         circuit = QuantumCircuit(len(graph.inputs()))
-        graph = cnot_data["graphs"][circuit_index]
-        frontier = cnot_data["frontier"][circuit_index]
-        frontier_neighbors = cnot_data["neighbors"][circuit_index]
+        graph = gate_data["graphs"][circuit_index]
+        frontier = gate_data["frontier"][circuit_index]
+        frontier_neighbors = gate_data["neighbors"][circuit_index]
 
-        gate_names = [f"{gate[0].name}: {gate[0].params}" for gate in cnot_data["circuits"][circuit_index].data] 
-        ctest, new_arch = get_circuit_from_mapper(mapper, get_exact_phases=False)
-
-        if len(rerouted_cnot_list[circuit_index])>0: print(f"      Cnot elimination with {rerouted_cnot_list[circuit_index]} CNOTs")
+        if len(rerouted_gate_list[circuit_index])>0: print(f"      Gate extraction with {rerouted_gate_list[circuit_index]}")
     
     return graph, frontier, frontier_neighbors, circuit, architecture_copy
 
 
-def apply_cnot_operations_and_store_data(graph:BaseGraph, frontier:Dict[int, VT], frontier_neighbors:List[VT], cnot_list:List[ReroutedGate], cnot_data:Dict[str, List[Any]], inverse=False) -> Dict[str, List[Any]]:
+def apply_gate_operations_and_store_data(graph:BaseGraph, frontier:Dict[int, VT], frontier_neighbors:List[VT], gate_list:List[ReroutedGate], gate_data:Dict[str, List[Any]], inverse:bool, apply_gate_function:Callable) -> Dict[str, List[Any]]:
+    """Applies the given gate list to the graph and stores the resulting graph, frontier, and neighbors in the gate_data dictionary."""
 
     graph_copy = graph.clone()
     frontier_copy = frontier.copy()
     neighbors_copy = frontier_neighbors.copy()
-    c = apply_cnots_to_circuit(graph_copy, None, frontier_copy, cnot_list, neighbors_copy, inverse)
-    cnot_data["circuits"].append(c)
-    cnot_data["graphs"].append(graph_copy)
-    cnot_data["frontier"].append(frontier_copy)
-    cnot_data["neighbors"].append(neighbors_copy)
+    c = apply_gate_function(graph_copy, None, frontier_copy, gate_list, neighbors_copy, inverse)
+    gate_data["circuits"].append(c)
+    gate_data["graphs"].append(graph_copy)
+    gate_data["frontier"].append(frontier_copy)
+    gate_data["neighbors"].append(neighbors_copy)
 
-    return cnot_data
+    return gate_data
 
 
 def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier:Dict[int, VT], rerouted_cnots: List[ReroutedGate], frontier_neighbors:List[VT], inverse:bool=False) -> Circuit|QuantumCircuit:
+    """Applies the CNOTs to the circuit and returns the updated circuit and graph. If the circuit is a QuantumCircuit, the CNOTs are added using the Qiskit API."""
+    
     #CNOT extraction
     frontier_with_removed = {i: -1 for i in range(len(g.inputs()))}
     frontier_with_removed.update(frontier)
@@ -553,7 +443,6 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
     basic_cnots = [rerouted_gate.basic_gate for rerouted_gate in rerouted_cnots]
     
     m = bi_adj(g, frontier_neighbors, list(frontier_with_removed.values()))
-    m_copy = m.copy()
     for cnot in basic_cnots:
         m.row_add(cnot.control, cnot.target)
 
@@ -566,6 +455,7 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
     for _ in range(len(frontier) - len(frontier_neighbors)):
         neighbors_copy.append(-1)
 
+    #Gates are reversed
     for rerouted_cnot in rerouted_cnots:
         rerouted_cnot.reverse_gate_qubits()
 
@@ -594,17 +484,8 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
         frontier[qubit] = w
 
     if circuit is None:
-        c_extracted_gates = QuantumCircuit(len(frontier_with_removed))
-        for cnot in cnots:
-            c_extracted_gates.cx(cnot.control, cnot.target)
-            # c_extracted_gates.add_gate("HAD",cnot.target)
-            # c_extracted_gates.add_gate("CZ", cnot.control, cnot.target)
-            # c_extracted_gates.add_gate("HAD",cnot.target)
-        for h in hads:
-            c_extracted_gates.h(h)
-        return c_extracted_gates
+        circuit = QuantumCircuit(len(frontier_with_removed))
 
-    
     for cnot in cnots:
         add_gate_to_circuit(circuit=circuit, gate=cnot)
         # c.append(HAD(cnot.target))
@@ -616,25 +497,27 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
     return circuit
 
 
+def apply_frontier_gates_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier:Dict[int, VT], rerouted_gates: List[ReroutedGate], frontier_neighbors:List[VT], inverse:bool=False) -> Circuit|QuantumCircuit:
+    """Applies the gates to the circuit and returns the updated circuit and graph. If the circuit is a QuantumCircuit, the gates are added using the Qiskit API."""
+
+    gates = sum(rerouted_gates, [])
+    frontier_with_removed = {i: -1 for i in range(len(g.inputs()))}
+    frontier_with_removed.update(frontier)
+
+    if circuit is None:
+        circuit = QuantumCircuit(len(frontier_with_removed))
+    
+    for gate in gates:
+        add_gate_to_circuit(circuit=circuit, gate=gate)
+        # c.append(HAD(cnot.target))
+        # c.append(CZ(cnot.control, cnot.target))
+        # c.append(HAD(cnot.target))
+
+    return circuit
 
 
-def eliminate_unary_phase_gadgets(g: BaseGraph, frontier: Dict[int, VT]):
-    """checks whether there are unary phase gadgets left in the diagram, that is phase gadgets which have only a single neighbor"""
-    while True:
-        change = False
-        for v in set(g.vertices()).difference(set(frontier.values())):
-            
-            n = list(g.neighbors(v))
-            if len(n) == 1 and g.phase(n[0]) == 0 and g.type(v) == VertexType.Z and g.type(n[0]) == VertexType.Z:
-                n2 = set(g.neighbors(n[0])).difference(set([v]))
-                if len(n2) == 1:
-                    root = n2.pop()
-                    g.set_phase(root, g.phase(root)+g.phase(v))
-                    g.remove_vertices([v,n[0]])
-                    change = True
-                    break
-        if not change:
-            break
+
+
 
 
 def get_cnot_row_operations(
@@ -731,6 +614,34 @@ def get_all_cnot_operations(
 
 
 
+
+
+
+def remove_gadget(
+        g: BaseGraph[VT, ET], 
+        frontier: Dict[int, VT],
+        inverse: bool = False
+        ) -> bool:
+    """Removes a gadget that is attached to a frontier vertex. Returns True if such gadget was found, False otherwise"""
+    gadget_set = get_frontier_gadgets(g, frontier)
+    removed_gadget = False
+    start = g.inputs() if not inverse else g.outputs()
+    
+    for root, _ in gadget_set:
+        first_frontier_neighbor = [o for o in g.neighbors(root) if o in frontier.values()][0]
+        if phase_is_true_clifford(g.phase(root)):
+            apply_rule(g, lcomp_with_boundaries, [(root, list(g.neighbors(root)))])  # type: ignore
+        else:
+            qubit_for_vertex = list(frontier.keys())[list(frontier.values()).index(first_frontier_neighbor)]
+            apply_rule(g, pivot, [(root, first_frontier_neighbor, [], [o for o in g.neighbors(first_frontier_neighbor) if o in start])])  # type: ignore
+            
+            frontier[qubit_for_vertex] = root
+
+        removed_gadget = True
+        break
+    return removed_gadget
+
+
 def get_all_gadgets(g: BaseGraph[VT, ET]) -> Dict[VT, VT]:
     """Returns all phase gadgets in the graph as a dictionary where the key is the root spider and the value is the top spider"""
     gadgets = dict()
@@ -782,119 +693,25 @@ def get_frontier_gadget_dict(g: BaseGraph[VT,ET], frontier: Dict[int, VT]):
     return gadget_dict
 
 
-
-def init_frontier(g: BaseGraph[VT, ET], circuit: Circuit|QuantumCircuit, inverse:bool=False) -> Dict[int,VT]:
-    """Inits the frontier of a ZX-diagram with the spiders adjacent to the inputs. Extracts Hadamard wires between inputs and frontier"""
-    frontier: Dict[int,VT] = dict()
-    start = list(g.inputs()) if not inverse else list(g.outputs())
-    end = list(g.outputs()) if not inverse else list(g.inputs())
-
-    for qubit, start_vertex in enumerate(start):
-        v = list(g.neighbors(start_vertex))[0]
-        if not v in end:
-            frontier[qubit] = v
-            if g.edge_type(g.edge(v,start_vertex)) == EdgeType.HADAMARD:
-                add_gate_to_circuit(circuit, HAD(qubit))
-                g.set_edge_type(g.edge(v,start_vertex),EdgeType.SIMPLE)
-    
-    return frontier
-
-
-def extract_czs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|QuantumCircuit, architecture:Architecture, optimize: bool = False):
-    """Extracts connected frontier spiders as controlled Z gates and updates the diagram"""
-    if optimize:
-        #TODO: this might need to be changed for all types of gadgets
-        optimize_czs_in_frontier(g, frontier)
-    change = False
-    for qubit, v in frontier.items():
-        for w in set(g.neighbors(v)).intersection(set(frontier.values())):
-            g.remove_edge(g.edge(v,w))
-            gate = CZ(qubit, list(frontier.keys())[list(frontier.values()).index(w)])
-            if architecture:
-                rerouted_gates = build_connection_from_architecture(architecture, gate)
-                for rerouted_gate in rerouted_gates:
-                    add_gate_to_circuit(circuit, rerouted_gate)
-            else:
-                add_gate_to_circuit(circuit, gate)
-            change = True
-    return change
-
-
-def extract_rzs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|QuantumCircuit, inverse: bool = False):
-    """Extracts phases of frontier spiders as ZPhase gates and updates the diagram"""
-    start = list(g.inputs()) if not inverse else list(g.outputs())
-    phase_change = False
-    
-    for qubit in list(frontier.keys()):
-        while True:
-            boundary = False
-            v = frontier[qubit]
-            phase = g.phase(v)
-            if phase != 0:
-                g.set_phase(v,0)
-                gate = ZPhase(qubit, phase)
-            else:
-                neighbors = [neighbor for neighbor in g.neighbors(v) if neighbor not in start]
-                if len(neighbors) != 1:
-                    break
-
-                if g.type(neighbors[0]) == VertexType.BOUNDARY:
-                    boundary = True
-                    if g.edge_type(g.edge(v,neighbors[0])) == EdgeType.HADAMARD:
-                        gate = HAD(qubit)
-                    else:
-                        gate = None
-
-                                    
-                    g.add_edge(g.edge(start[qubit],neighbors[0]))
-                    del frontier[qubit]
-                else:
-                    frontier[qubit] = neighbors[0]
-                    gate = HAD(qubit)
-
-                    first_start = [neighbor for neighbor in g.neighbors(v) if neighbor in start]
-                    g.add_edge(g.edge(first_start[0], neighbors[0]))
-                    
-                    print("Simple vertex")
-                                
-                g.remove_vertex(v)
-
+def eliminate_unary_phase_gadgets(g: BaseGraph, frontier: Dict[int, VT]):
+    """checks whether there are unary phase gadgets left in the diagram, that is phase gadgets which have only a single neighbor"""
+    while True:
+        change = False
+        for v in set(g.vertices()).difference(set(frontier.values())):
             
-            if gate:
-                add_gate_to_circuit(circuit, gate)
-                phase_change = True
-
-            if boundary:
-                break
-
-    return phase_change
-
-
-def optimize_czs_in_frontier(g: BaseGraph, frontier: Dict[int, VT]):
-    """optimizes czs in a frontier by applying local complementations on phase gadgets so that the number of wires between frontiers decreases
-    effect on overall runtime relatively small yet."""
-    gadget_dict = get_frontier_gadget_dict(g, frontier)
-    for degree in sorted(gadget_dict.keys()):
-        for gadget_root, gadget_top, gadget_neighbors in gadget_dict[degree]:
-            if g.subgraph_from_vertices(gadget_neighbors).num_edges() > len(gadget_neighbors)*(len(gadget_neighbors)-1)/4:
-                #lcomp removes more edges in the frontier set than it creates
-                # print("complemented away czs")
-                complement_neighbors(g, list(gadget_neighbors))
-                for neighbor in gadget_neighbors:
-                    g.set_phase(neighbor, g.phase(neighbor)+Fraction(1,2))
-                g.set_phase(gadget_top, g.phase(gadget_top)-Fraction(1,2))
+            n = list(g.neighbors(v))
+            if len(n) == 1 and g.phase(n[0]) == 0 and g.type(v) == VertexType.Z and g.type(n[0]) == VertexType.Z:
+                n2 = set(g.neighbors(n[0])).difference(set([v]))
+                if len(n2) == 1:
+                    root = n2.pop()
+                    g.set_phase(root, g.phase(root)+g.phase(v))
+                    g.remove_vertices([v,n[0]])
+                    change = True
+                    break
+        if not change:
+            break
 
 
-def complement_neighbors(g: BaseGraph, vn: List[VT]):
-    """complements connections between a set of vertices, i.e. everything connected gets disconnected and vice versa"""
-    vn.sort()
-    for n in vn:
-        # flip edges
-        for n2 in vn[vn.index(n)+1:]:
-            if g.connected(n,n2):
-                g.remove_edge(g.edge(n,n2))
-            else:
-                g.add_edge(g.edge(n,n2), EdgeType.HADAMARD)
 
 
 

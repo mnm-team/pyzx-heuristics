@@ -5,9 +5,9 @@
     "nColumns": 4,
     "nAods": 1,
     "nAodCoordinates": 5,
-    "interQubitDistance": 3,
+    "interQubitDistance": 1,
     "minimalAodDistance": 0.1,
-    "interactionRadius": 1.5,
+    "interactionRadius": 1,
     "blockingFactor": 1
   },
   "parameters": {

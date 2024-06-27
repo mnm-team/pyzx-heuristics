@@ -7,7 +7,17 @@ from pyzx.routing.architecture import Architecture
 
 
 class ReroutedGate():
+    """A class that represents a gate that has been rerouted to satisfy the constraints of an architecture
+    Attributes:
+        basic_gate: The original gate that was rerouted
+        gate_path: The path of gates that the basic gate was rerouted to
+    """
     def __init__(self, basic_gate:Gate, gate_path:List[Gate]|None):
+        """Initializes a ReroutedGate object
+        Args:
+            basic_gate: The original gate that was rerouted
+            gate_path: The path of gates that the basic gate was rerouted to. If None, the gate_path is set to [basic_gate]
+        """
         self.basic_gate = basic_gate
         if not gate_path:
             self.gate_path = [basic_gate.copy()]
@@ -15,9 +25,13 @@ class ReroutedGate():
             self.gate_path = gate_path
 
     def is_gate_rerouted(self) -> bool:
+        """Returns True if the gate has been rerouted, False otherwise"""
         return len(self.gate_path) > 1
     
     def reverse_gate_qubits(self):
+        """Reverses the target and control qubits of the basic gate and the gates in the gate path"""
+
+        #TODO: this is a hacky way to do this, should be implemented in the Gate class
         assert(all(hasattr(gate, "target") and hasattr(gate, "control") for gate in self.gate_path))
         for gate in self.gate_path:
             gate.target, gate.control = gate.control, gate.target
@@ -25,6 +39,7 @@ class ReroutedGate():
         self.basic_gate.target, self.basic_gate.control = self.basic_gate.control, self.basic_gate.target
 
     def is_viable_for_architecture(self, architecture:Architecture) -> bool:
+        """Returns True if the gate path is viable for the given architecture, False otherwise"""
 
         for gate in self.gate_path:
             if not hasattr(gate, "target"):
@@ -82,6 +97,7 @@ def move_target(gate:Gate, new_target:int):
 
 
 def move_control_to_next(architecture:Architecture, path:List[int], gate:Gate) -> List[Gate]:
+    """Given a path of qubits and a gate, returns a list of CNOTs that move the control qubit of the gate along the path"""
 
     rerouting_result = []
 
@@ -99,6 +115,7 @@ def move_control_to_next(architecture:Architecture, path:List[int], gate:Gate) -
 
 
 def move_target_to_control(architecture:Architecture, path:List[int], gate:Gate) -> List[Gate]:
+    """Given a path of qubits and a gate, returns a list of CNOTs that move the target qubit of the gate along the path"""
 
     rerouting_result = []
 

@@ -21,6 +21,7 @@ from tests.test_heuristics.test_utils import apply_random_matches, calculate_gfl
 class TestHeuristics():
 
     def test_update_matches(self):
+        random.seed(1)
         # Create a test graph
         graph = zx.generate.cliffordT(qubits=10, depth=500)
 

@@ -12,6 +12,7 @@ from pyzx.routing.architecture import Architecture
 
 
 def create_mapper(architecture_name: str = "rubidium.json") -> HybridSynthesisMapper:
+    """Create a mapper object with the given mapper_architecture file."""
 
     path = Path(__file__).parent.parent.resolve()   
     # create a neutral atom hybrid architecture
@@ -40,11 +41,14 @@ def create_mapper(architecture_name: str = "rubidium.json") -> HybridSynthesisMa
 
 
 def init_mapper(mapper:HybridSynthesisMapper, num_qubits:int, initial_mapping:InitialCircuitMapping = InitialCircuitMapping.identity) -> None:
+    """Initialize the mapper with the given number of qubits and initial mapping."""
     # set the initial circuit mapping and the size of the mapping(number of qubits)
     mapper.init_mapping(n_qubits=num_qubits, initial_mapping=initial_mapping)
 
 
 def gate_mapper(mapper:HybridSynthesisMapper, circuit: Circuit | list[Circuit]) -> Tuple[Architecture, int]:
+    """Map the gates in the given circuit to the architecture and return the new architecture and the index of the mapped circuit.
+    If multiple circuits are given, the mapper will choose the optimal one to map and return the index of that circuit."""
 
     if not isinstance(circuit, list):
         circuit = [circuit]
@@ -59,6 +63,7 @@ def gate_mapper(mapper:HybridSynthesisMapper, circuit: Circuit | list[Circuit]) 
 
     index = mapper.evaluate_synthesis_steps(qiskit_circuits, also_map=False)
 
+    #TODO: Mapper does not map the gates correctly, it just takes the given gates while changing the adjacency matrix
     # append a circuit to the mapper by mapping it to the architecture and adding it to the circuit
     mapper.append_with_mapping(qiskit_circuits[index])
 
@@ -77,6 +82,8 @@ def gate_mapper(mapper:HybridSynthesisMapper, circuit: Circuit | list[Circuit]) 
     return Architecture("new_coupling", coupling_matrix=adjacency_matrix, qubit_map=list(range(qiskit_circuits[index].num_qubits))), index
 
 def get_circuit_from_mapper(mapper:HybridSynthesisMapper, get_exact_phases:bool=False) -> Tuple[Circuit, Architecture]:
+    """Get the circuit from the mapper and return the circuit and the new architecture."""
+    
     synthesized_circuit_qasm = mapper.get_synthesized_qc()
     circuit = QASMParser().parse(synthesized_circuit_qasm)
     for gate in circuit.gates:
