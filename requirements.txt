@@ -12,3 +12,7 @@ mypy>=0.990
 nbsphinx~=0.9.3
 sphinxcontrib-svg2pdfconverter>=1.2.2
 lark~=1.1.7
+
+networkx>=2.8.8
+pandas>=2.2.0
+pytest>=8.0.2

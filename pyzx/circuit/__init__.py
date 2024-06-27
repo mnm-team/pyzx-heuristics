@@ -208,6 +208,26 @@ class Circuit(object):
             else:
                 c.add_gate(g)
         return c
+    
+
+    def reorder_qubits(self, qubit_map: list[int]) -> None:
+        ordered_qubit_map = sorted(qubit_map)
+
+        assert(ordered_qubit_map == list(range(self.qubits)))
+
+        #TODO: this should be implemented in the gate class
+        for g in self.gates:
+            if hasattr(g, 'control'):
+                g.control = qubit_map[g.control]
+            if hasattr(g, 'target'):
+                g.target = qubit_map[g.target]
+            if hasattr(g, 'ctrl1'):
+                g.ctrl1 = qubit_map[g.ctrl1]
+            if hasattr(g, 'ctrl2'):
+                g.ctrl2 = qubit_map[g.ctrl2]
+            if hasattr(g, 'controls'):
+                g.controls = [qubit_map[c] for c in g.controls]
+
 
     ### OPERATORS
 

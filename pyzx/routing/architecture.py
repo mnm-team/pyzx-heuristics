@@ -209,7 +209,24 @@ class Architecture():
             self._non_cutting_vertices[hash] = [subgraph_vertices[i] for i, cutting in enumerate(subgraph_cutting) if not cutting]
 
         return self._non_cutting_vertices[hash]
+    
+    def is_subgraph_connected(self, subgraph_vertices: List[int]) -> bool:
+        """
+        Check if the subgraph is connected
+        """
+        vertices = [self.vertices[i] for i in subgraph_vertices]
+        subgraph_qubits = [self.vertex2qubit(v) for v in vertices]
+        
+        for start_index in range(len(vertices)):
+            for end_index in range(start_index+1, len(vertices)):
+                start = vertices[start_index]
+                end = vertices[end_index]
+                
+                path = self.shortest_path(self.vertex2qubit(start), self.vertex2qubit(end), subgraph_qubits)
 
+                if path is None:                    
+                    return False
+        return True
 
     def _is_cutting(self, vertices: Optional[List[int]]=None) -> List[bool]:
         # algorithm from https://courses.cs.washington.edu/courses/cse421/04su/slides/artic.pdf and https://www.geeksforgeeks.org/articulation-points-or-cut-vertices-in-a-graph/ 
