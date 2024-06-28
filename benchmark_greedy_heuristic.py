@@ -362,6 +362,8 @@ def run_benchmark():
         **{f"GN_PG_CFlow{la}": partial(zx.simplify.greedy_simp_neighbors, lookahead=la, threshold=threshold, use_yz_phase_gadgets=True, use_xz_phase_gadgets=True, flow_function=FilterFlowFunc.C_FLOW_PRESERVING) for la in lookahead}
     }
 
+    #FIXME: Flow calculation takes increasingly longer with each execution in loop.
+    # This should not happen. Current Hack: using seperate child processes for each execution.
     for algorithm_name, algorithm in algorithms.items():
         if algorithm is None:
             continue
