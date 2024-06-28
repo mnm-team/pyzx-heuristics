@@ -59,6 +59,8 @@ class TestExtraction():
 
         random.seed(seed)
         
+        #FIXME: This test is not correct. The circuit is not the same as the one returned by the mapper
+        #In one of the last iterations, the mapper returns a different set of cnot operations than without the mapper.
         circuit, graph = get_circuit_and_fr_graph(num_qubits, depth, seed)
 
         architecture = create_line_architecture(graph.qubit_count())

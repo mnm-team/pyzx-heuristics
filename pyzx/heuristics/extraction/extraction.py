@@ -77,7 +77,7 @@ def extract_architecture_aware_circuit(
         # create mapper
         mapper = HybridSynthesisMapper(arch=architecture_mapper, params=params)
 
-        mapper.init_mapping(graph.num_outputs(), InitialCircuitMapping.identity)
+        mapper.init_mapping(graph.num_inputs(), InitialCircuitMapping.identity)
     else:   
         circuit = Circuit(len(outputs))
         mapper = None
@@ -89,11 +89,15 @@ def extract_architecture_aware_circuit(
     frontier_neighbors = []
 
     if mapper:
+        # Get initial architecture from mapper
         _, architecture_copy = get_circuit_from_mapper(mapper, get_exact_phases=False)
     
     while True:
+        # First we extract the gates that are in the frontier (single qubit and CZs)
         frontier_gates, czs_saved = extract_frontier_gates(graph, frontier, optimize_czs, None)
 
+        # Apply the gates to the circuit
+        # If the mapper changed the architecture, we need to update it. If not mapper is used, the architecture is not changed
         graph, frontier, frontier_neighbors, circuit, architecture_new = apply_gates_to_circuit(graph, circuit, mapper, frontier, frontier_neighbors, [frontier_gates], inverse=True, apply_gate_function=apply_frontier_gates_to_circuit)
         if architecture_new:
             architecture_copy = architecture_new
@@ -130,6 +134,7 @@ def extract_architecture_aware_circuit(
                     rerouted_cnot_list = [rerouted_cnot_list]
 
             if not rerouted_cnot_list:  # No CNOTs found
+                #TODO: This should not be needed since remove_gadget can remove xz and yz gadgets
                 if not eliminate_yz_spider(graph, frontier, frontier_neighbors, circuit):
                     raise Exception("Extraction failed")
                 rerouted_cnot_list = [[]]

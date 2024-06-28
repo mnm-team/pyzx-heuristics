@@ -73,6 +73,7 @@ def mcp_aware_extract(
 
     if architecture:
         if mapper:
+            # Get initial architecture from mapper
             _, architecture_copy = get_circuit_from_mapper(mapper, get_exact_phases=False)
         else:
             architecture_copy = Architecture(name=architecture.name, coupling_graph=architecture.graph.copy(), qubit_map=list(range(len(frontier))))
@@ -88,8 +89,10 @@ def mcp_aware_extract(
         cz_gates = extract_czs(graph, frontier, circuit, None, cz_optimize)
         mcp_gates = extract_mcp(graph, frontier, circuit, None, allow_insertions)
         #Phase + Hadamard extraction
+        #TODO: Change to return a list of gates instead of changing the circuit
         rz_gates = extract_rzs(graph, frontier, circuit)
 
+        #TODO: use apply_gates_to_circuit with apply_frontier_gates_to_circuit
         if use_gate_mapping and len(circuit.data) > 0:
             # If we have extracted some CZ gates, we need to add them to the circuit
             architecture_copy, circuit_index = gate_mapper(mapper, circuit)
@@ -110,6 +113,7 @@ def mcp_aware_extract(
                     rerouted_cnot_list = [rerouted_cnot_list]
 
             if not rerouted_cnot_list:  # No CNOTs found
+                #TODO: check if mcp extraction can be changed to also extract yz gadgets
                 if not eliminate_yz_spider(graph, frontier, frontier_neighbors, circuit):
                     raise Exception("Extraction failed")
                     # import pdb
@@ -262,6 +266,10 @@ def construct_maximal_mcp(g: BaseGraph[VT, ET], frontier: Dict[int,VT]):
 
 def extract_mcp(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|QuantumCircuit, architecture:Architecture, allow_insertions: bool = False): 
     """extracts a single (multi or normal) controlled phase gate from the diagram"""
+    #TODO: This should return multiple options for the mcp extraction.
+    # 1. Extract the gadget via a pivot
+    # 2. Extract all C2P gadgets as mcp gates. Use pivot for the rest
+    # 3. Full Insertion of missing phase gadgets
     if allow_insertions:
         mcp = construct_maximal_mcp(g, frontier)
     else:
@@ -309,7 +317,6 @@ def extract_mcp(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|Q
 def extract_czs(g: BaseGraph[VT, ET], frontier: Dict[int,VT], circuit: Circuit|QuantumCircuit, architecture:Architecture, optimize: bool = False):
     """Extracts connected frontier spiders as controlled Z gates and updates the diagram"""
     if optimize:
-        #TODO: this might need to be changed for all types of gadgets
         optimize_czs_in_frontier(g, frontier)
     change = False
     for qubit, v in frontier.items():

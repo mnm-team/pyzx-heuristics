@@ -199,7 +199,6 @@ def build_connection_from_architecture(architecture: Architecture, gate:Gate) ->
 
             rerouting_result = []
             
-            #TODO: check for shuttling
             for i in range(len(shortest_qubit_path)-2):
                 rerouting_result.append(CNOT(shortest_qubit_path[i], shortest_qubit_path[i+1]))
             rerouting_result.append(gate_copy.copy())

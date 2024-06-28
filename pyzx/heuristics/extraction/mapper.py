@@ -11,12 +11,17 @@ from pyzx.circuit.qasmparser import QASMParser
 from pyzx.routing.architecture import Architecture
 
 
-def create_mapper(architecture_name: str = "rubidium.json") -> HybridSynthesisMapper:
+def create_mapper(mapper_architecture_name: str = "rubidium.json") -> HybridSynthesisMapper:
     """Create a mapper object with the given mapper_architecture file."""
+    # FIXME: mapper cant be created in a separate function. Error is probably in c++ code
 
     path = Path(__file__).parent.parent.resolve()   
+    
+    # TODO: The mapper_architecture should be created from the coupling matrix which can be taken from the architecture of the extraction
+    # Currently the mapper_architecture is created based on the interactionRadius in the mapper_architecture_name file
+    
     # create a neutral atom hybrid architecture
-    architecture = NeutralAtomHybridArchitecture(str(path)+"/mapper_files/"+architecture_name)
+    mapper_architecture = NeutralAtomHybridArchitecture(str(path)+"/mapper_files/"+mapper_architecture_name)
 
     # set mapper parameters (skip to use default values)
     params = HybridMapperParameters()
@@ -32,7 +37,7 @@ def create_mapper(architecture_name: str = "rubidium.json") -> HybridSynthesisMa
     params.verbose = True
 
     # create mapper
-    synthesis_mapper = HybridSynthesisMapper(arch=architecture, params=params)
+    synthesis_mapper = HybridSynthesisMapper(arch=mapper_architecture, params=params)
     # alternatively
     # synthesis_mapper = HybridSynthesisMapper(arch=architecture)
     # synthesis_mapper.set_parameters(params)
@@ -63,7 +68,6 @@ def gate_mapper(mapper:HybridSynthesisMapper, circuit: Circuit | list[Circuit]) 
 
     index = mapper.evaluate_synthesis_steps(qiskit_circuits, also_map=False)
 
-    #TODO: Mapper does not map the gates correctly, it just takes the given gates while changing the adjacency matrix
     # append a circuit to the mapper by mapping it to the architecture and adding it to the circuit
     mapper.append_with_mapping(qiskit_circuits[index])
 
@@ -82,8 +86,10 @@ def gate_mapper(mapper:HybridSynthesisMapper, circuit: Circuit | list[Circuit]) 
     return Architecture("new_coupling", coupling_matrix=adjacency_matrix, qubit_map=list(range(qiskit_circuits[index].num_qubits))), index
 
 def get_circuit_from_mapper(mapper:HybridSynthesisMapper, get_exact_phases:bool=False) -> Tuple[Circuit, Architecture]:
-    """Get the circuit from the mapper and return the circuit and the new architecture."""
+    """Get the circuit from the mapper and return the circuit and the new architecture.
+    If get_exact_phases is True, the exact phases of the gates will be returned, otherwise the phases will be rounded to the nearest quarter of pi."""
     
+    #TODO: The mapper should return the mappeed circuit ``.get_mapped_qc()`` but move operations are not yet supported
     synthesized_circuit_qasm = mapper.get_synthesized_qc()
     circuit = QASMParser().parse(synthesized_circuit_qasm)
     for gate in circuit.gates:

@@ -393,6 +393,8 @@ def apply_gates_to_circuit(graph:BaseGraph,
     while gate_list_index < len(rerouted_gate_list):
         current_gate_list = rerouted_gate_list[gate_list_index]
         if mapper:
+            # If a mapper is given, each gate_list is applied to an empty circuit and stored in the gate_data dictionary.
+            # The graph, frontier, and frontier_neighbors are updated accordingly and also stored in the gate_data dictionary.
             gate_data = apply_gate_operations_and_store_data(graph, frontier, frontier_neighbors, copy.deepcopy(current_gate_list), gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
             if current_gate_list and any(rerouted_gate.is_gate_rerouted() for rerouted_gate in current_gate_list):
                 basic_gates = [ReroutedGate(rerouted_gate.basic_gate.copy(), None) for rerouted_gate in current_gate_list]
@@ -400,6 +402,8 @@ def apply_gates_to_circuit(graph:BaseGraph,
                 rerouted_gate_list.insert(gate_list_index, basic_gates)
                 gate_data = apply_gate_operations_and_store_data(graph, frontier, frontier_neighbors, basic_gates, gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
         else:
+            # If no mapper is given, the gates are applied directly to the circuit.
+            # Only one gate list is supported without gate mapping
             if len(rerouted_gate_list) > 1:
                 raise ValueError("Multiple Gatelists not supported without gate mapping")
             circuit = apply_gate_function(graph, circuit, frontier, current_gate_list, frontier_neighbors, inverse=inverse)
@@ -407,6 +411,9 @@ def apply_gates_to_circuit(graph:BaseGraph,
     
     architecture_copy = None
     if mapper:
+        # If a mapper is given, all stored circuits are given to the mapper to choose the optimal one to map.
+        # The chosen circuit is then mapped to the architecture and the architecture is returned.
+        # The according graph, frontier, and frontier_neighbors are taken from the gate_data dictionary.
         architecture_copy, circuit_index = gate_mapper(mapper, gate_data["circuits"])
         circuit = QuantumCircuit(len(graph.inputs()))
         graph = gate_data["graphs"][circuit_index]
@@ -442,6 +449,7 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
 
     basic_cnots = [rerouted_gate.basic_gate for rerouted_gate in rerouted_cnots]
     
+    # Apply basic CNOTs to the matrix to save computation time
     m = bi_adj(g, frontier_neighbors, list(frontier_with_removed.values()))
     for cnot in basic_cnots:
         m.row_add(cnot.control, cnot.target)
@@ -449,13 +457,15 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
     if all(sum(row) != 1 for row in m.data):
         raise Exception("CNOTs do not suffice to extract a vertex")
     
+    # If we start from the inputs or outputs
     start = g.inputs() if not inverse else g.outputs()
 
+    # Neighbors are padded with -1 since the list cant be shorter than the frontier for connectivity_from_biadj
     neighbors_copy = frontier_neighbors.copy()
     for _ in range(len(frontier) - len(frontier_neighbors)):
         neighbors_copy.append(-1)
 
-    #Gates are reversed
+    #Gates are reversed according to paper "there and back again"
     for rerouted_cnot in rerouted_cnots:
         rerouted_cnot.reverse_gate_qubits()
 
@@ -486,6 +496,7 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
     if circuit is None:
         circuit = QuantumCircuit(len(frontier_with_removed))
 
+    #TODO: Add parameter to choose between cnot and had+cz+had
     for cnot in cnots:
         add_gate_to_circuit(circuit=circuit, gate=cnot)
         # c.append(HAD(cnot.target))
@@ -551,7 +562,7 @@ def get_all_cnot_operations(
      -> because of gflow the resulting matrix has a row with only a single 1"""
     frontier_with_removed = {i: -1 for i in range(len(g.outputs()))}
     frontier_with_removed.update(frontier)
-    m_frontier = bi_adj(g, list(frontier_neighbors), frontier.values())
+
     m: Mat2 = bi_adj(g, list(frontier_neighbors), frontier_with_removed.values())
     m2: Mat2 = m.copy()
     elim_mode = ElimMode.STEINER_MODE
@@ -569,7 +580,8 @@ def get_all_cnot_operations(
         m2_no_arch = m2.copy()
 
         # if architecture:
-        #     #FIXME: This does not seem to work is a frontier is already removed
+        #     #FIXME: This does not seem to work if a frontier is already removed
+        #     #STEINER_MODE needs to be studied in more detail
         #     cnot_list_arch, rank = gauss(architecture=architecture, matrix=m2, mode=elim_mode, full_reduce=True)
         #     cnot_list_arch = filter_duplicate_cnots(cnot_list_arch)
         #     # cnots_arch = [CNOT(cnot.target, cnot.control) for cnot in cnot_list_arch]
@@ -584,31 +596,8 @@ def get_all_cnot_operations(
 
         if not any([sum(row) == 1 for row in m2.data]):
             return None
-    else:
-        # cnot_list_greedy_basic = []
-
-        # # Iterate through each rerouted_gate_list in greedy_operations
-        # for rerouted_gate_list in greedy_operations:
-        #     # Check if any rerouted_gate in the rerouted_gate_list satisfies the condition
-        #     # This replaces the any(...) part of the original code, aiming to short-circuit the evaluation
-        #     if any(len(rerouted_gate.gate_path) > 1 for rerouted_gate in rerouted_gate_list):
-        #         # If the condition is satisfied, extract the basic_gate from each rerouted_gate
-        #         # and add the list of basic_gates to the optimized_cnot_list
-        #         cnot_list_greedy_basic.append([rerouted_gate.basic_gate for rerouted_gate in rerouted_gate_list])
-
-        # cnot_list_greedy: list[list[CNOT]] = []
-        # for rerouted_gate_list in greedy_operations:
-        #     rerouted_cnots: list[CNOT] = []
-        #     for rerouted_gate in rerouted_gate_list:
-        #         rerouted_cnots.extend(rerouted_gate.gate_path)
-        #     cnot_list_greedy.append(filter_duplicate_cnots(rerouted_cnots))
-        
-
+    else:     
         cnots = greedy_operations
-
-    # for cnot_list in cnots:
-    #     if not greedy_operations: print(f"      Gaussian elimination with {cnot_list} CNOTs")
-    #     else: print(f"      Greedy elimination with {cnot_list} CNOTs")
 
     return cnots
 
