@@ -59,7 +59,7 @@ def mcp_aware_extract(
         # The initial mapping between atoms and hardware
         params.initial_mapping = InitialCoordinateMapping.trivial
         # If mapper should print debug information
-        params.verbose = True
+        params.verbose = False
 
         # create mapper
         mapper = HybridSynthesisMapper(arch=architecture_mapper, params=params)

@@ -407,6 +407,8 @@ def apply_gates_to_circuit(graph:BaseGraph,
             if len(rerouted_gate_list) > 1:
                 raise ValueError("Multiple Gatelists not supported without gate mapping")
             circuit = apply_gate_function(graph, circuit, frontier, current_gate_list, frontier_neighbors, inverse=inverse)
+
+            if len(rerouted_gate_list[0])>0: print(f"      Gate extraction with {rerouted_gate_list[0]}")
         gate_list_index += 1
     
     architecture_copy = None
@@ -546,8 +548,6 @@ def get_cnot_row_operations(
         return None
     
     rerouted_gates = get_best_cnot_configuration(rerouted_gate_list, architecture)
-
-    print(f"      CNOT elimination with {rerouted_gates} CNOTs")
     
     return rerouted_gates
 
