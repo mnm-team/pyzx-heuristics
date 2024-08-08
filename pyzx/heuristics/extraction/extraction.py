@@ -10,14 +10,96 @@ from pyzx.heuristics.extraction.extraction_base import apply_cnots_to_circuit, a
 from pyzx.heuristics.extraction.extraction_mcp import eliminate_yz_spider
 from pyzx.heuristics.extraction.mapper import get_circuit_from_mapper
 from pyzx.heuristics.extraction.rerouting import ReroutedGate, build_connection_from_architecture
+from pyzx.heuristics.tools import insert_identity
 from pyzx.linalg import Mat2
 from pyzx.routing.architecture import Architecture
 from pyzx.simplify import id_simp
 from pyzx.utils import EdgeType
+from pyzx.drawing import draw
+from pyzx.tensor import compare_tensors
+from pyzx.extract import extract_circuit
 
 
 from mqt.qmap import HybridSynthesisMapper, NeutralAtomHybridArchitecture, HybridMapperParameters, InitialCoordinateMapping, InitialCircuitMapping
 
+def create_na_mapper(config_path: str, num_qubits: int):
+    architecture_mapper = NeutralAtomHybridArchitecture(config_path)
+    # set mapper parameters (skip to use default values)
+    params = HybridMapperParameters()
+    # mapper should use SWAP gates or shuttling operations
+    params.gate_weight = 0
+    params.shuttling_weight = 1
+    # look-ahead weights
+    params.lookahead_weight_moves = 0.1
+    params.lookahead_weight_swaps = 0.1
+    # The initial mapping between atoms and hardware
+    params.initial_mapping = InitialCoordinateMapping.trivial
+    # If mapper should print debug information
+    params.verbose = False
+
+    # create mapper
+    mapper = HybridSynthesisMapper(arch=architecture_mapper) #, params=params
+
+    mapper.init_mapping(6)
+
+    return mapper
+
+def extract_with_mapper(g: BaseGraph[VT, ET], mapper: HybridSynthesisMapper, optimize_czs: bool = True):
+    orig_circ = extract_circuit(g.copy())
+    print(mapper.get_circuit_adjacency_matrix())
+    circuit, architecture = get_circuit_from_mapper(mapper, get_exact_phases=False) #TODO: exact_phase?
+    frontier = init_frontier(g, circuit, False)
+    while True:
+        draw(g, labels=True, scale=30)
+        print("check phase+cz+had frontier is",frontier)
+        if not compare_tensors(orig_circ, circuit+extract_circuit(g.copy())):
+            print("tensors do not match")
+        else:
+            print("tensors ok")
+        # import pdb
+        # pdb.set_trace()
+        # First we extract the gates that are in the frontier (single qubit and CZs)
+        extracted_gates, czs_saved = extract_frontier_gates(g, frontier, optimize_czs, architecture)
+        if extracted_gates:
+            g, frontier, circuit, architecture = apply_gates_to_circuit(g, circuit, mapper, frontier, [extracted_gates], apply_gate_function=apply_frontier_gates_to_circuit)
+            continue
+        
+        if not frontier:
+            break
+        print("check gadget")
+        # Before CNOT extraction we check if there is a phase gadget in the way
+        if remove_gadget(g, frontier):
+            # There was a gadget in the way. Go back to the top
+            continue
+        
+        #prepare frontier (i.e. add identity between output and frontier vertex if they are connected)
+        for v in frontier.values():
+            output_neighbor = set(g.outputs()).intersection(set(g.neighbors(v)))
+            if output_neighbor:
+                insert_identity(g, output_neighbor.pop(), v)
+
+        frontier_neighbors = list(get_neighbors_of_frontier(g, frontier))
+        # frontier_with_removed = [v for v in frontier.values() if not set(g.neighbors(v)).intersection(g.outputs())]
+        print("check cnot frontier:",frontier.values(),"frontier neighbors:",frontier_neighbors)
+        m = bi_adj(g, frontier_neighbors, frontier.values())
+        print(m)
+        if all(sum(row) != 1 for row in m.data):
+            print("have to find cnots")
+            # if 33 in frontier_neighbors:
+            #     import pdb
+            #     pdb.set_trace()
+            rerouted_cnot_list = get_all_cnot_operations(g, frontier.values(), frontier_neighbors, architecture)
+            if not rerouted_cnot_list:
+                print("fatal: no cnots found")
+                return
+            g, frontier, circuit, architecture = apply_gates_to_circuit(g, circuit, mapper, frontier, rerouted_cnot_list, apply_gate_function=apply_cnots_to_circuit)
+        else:
+            continue
+
+    id_simp(g, quiet=True)
+
+    circuit, architecture = get_circuit_from_mapper(mapper, get_exact_phases=False)
+    return circuit + graph_to_swaps(g, False), architecture #TODO: Last swaps are not architecture aware but could be arranged via qubit reordering? missing hadamards should be removed already?
 
 
 def extract_architecture_aware_circuit(
@@ -185,11 +267,14 @@ def extract_frontier_gates(g: BaseGraph[VT, ET], frontier: Dict[int, VT], optimi
 
     return single_qubit_gates+two_qubit_gates, czs_saved
 
-def get_two_qubit_gates(graph:BaseGraph, frontier:Dict[int,VT], optimize_czs:bool, architecture:Architecture|None = None) -> Tuple[List[ReroutedGate], int]:
+def get_two_qubit_gates(graph:BaseGraph, frontier:Dict[int,VT], optimize_czs:bool, reverse = False, architecture:Architecture|None = None) -> Tuple[List[ReroutedGate], int]:
     """Extracts two qubit gates from the frontier and removes them from the graph.
     Returns a list of the extracted two qubit gates."""
-    
-    outputs = graph.outputs()
+    if reverse:
+        outputs = graph.outputs()
+    else:
+        outputs = graph.inputs()
+
     czs_saved = 0
     two_qubit_gates = []
     
@@ -241,12 +326,15 @@ def get_two_qubit_gates(graph:BaseGraph, frontier:Dict[int,VT], optimize_czs:boo
     
     return two_qubit_gates, czs_saved
 
-def get_single_qubit_gates(graph:BaseGraph, frontier:Dict[int, VT]) -> List[ReroutedGate]:
+def get_single_qubit_gates(graph:BaseGraph, frontier:Dict[int, VT], reverse = False) -> List[ReroutedGate]:
     """Extracts single qubit gates from the frontier and removes them from the graph.
     Returns a list of the extracted single qubit gates."""
     
     phases = graph.phases()
-    outputs = graph.outputs()
+    if reverse:
+        outputs = graph.outputs()
+    else:
+        outputs = graph.inputs()
     single_qubit_gates = []
     for qubit, vertex in frontier.copy().items():  # First removing single qubit gates
         b = [w for w in graph.neighbors(vertex) if w in outputs][0]
@@ -257,4 +345,19 @@ def get_single_qubit_gates(graph:BaseGraph, frontier:Dict[int, VT]) -> List[Rero
         if phases[vertex]:
             single_qubit_gates.append(ReroutedGate(ZPhase(qubit, phases[vertex]), None))
             graph.set_phase(vertex, 0)
+        neighbors = list(graph.neighbors(vertex))
+        if len(neighbors) == 2:
+            hcount = sum([graph.edge_type(graph.edge(vertex, neighbor)) == EdgeType.HADAMARD for neighbor in neighbors])
+            graph.remove_vertex(vertex)
+            if hcount % 2 == 1:
+                single_qubit_gates.append(ReroutedGate(HAD(qubit), None))
+            graph.add_edge(graph.edge(neighbors[0],neighbors[1]), EdgeType.SIMPLE)
+            print("rem vert",vertex,"add edge",neighbors[0],neighbors[1])
+            if set(graph.outputs()).intersection(set(neighbors)):
+                print("remove ",qubit,"from frontier")
+                del frontier[qubit]
+            else:
+                frontier[qubit] = neighbors[0] if neighbors[1] in graph.inputs() else neighbors[1]
+        
+
     return single_qubit_gates

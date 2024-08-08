@@ -376,7 +376,6 @@ def apply_gates_to_circuit(graph:BaseGraph,
                             circuit:Circuit|QuantumCircuit,
                             mapper, 
                             frontier:Dict[int, VT], 
-                            frontier_neighbors:List[VT], 
                             rerouted_gate_list:List[List[ReroutedGate]],
                             apply_gate_function:Callable[[BaseGraph, Circuit|QuantumCircuit, Dict[int, VT], List[ReroutedGate], List[VT], bool], Circuit|QuantumCircuit],
                             inverse:bool=False,
@@ -395,18 +394,18 @@ def apply_gates_to_circuit(graph:BaseGraph,
         if mapper:
             # If a mapper is given, each gate_list is applied to an empty circuit and stored in the gate_data dictionary.
             # The graph, frontier, and frontier_neighbors are updated accordingly and also stored in the gate_data dictionary.
-            gate_data = apply_gate_operations_and_store_data(graph, frontier, frontier_neighbors, copy.deepcopy(current_gate_list), gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
+            gate_data = apply_gate_operations_and_store_data(graph, frontier, copy.deepcopy(current_gate_list), gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
             if current_gate_list and any(rerouted_gate.is_gate_rerouted() for rerouted_gate in current_gate_list):
                 basic_gates = [ReroutedGate(rerouted_gate.basic_gate.copy(), None) for rerouted_gate in current_gate_list]
                 gate_list_index += 1
                 rerouted_gate_list.insert(gate_list_index, basic_gates)
-                gate_data = apply_gate_operations_and_store_data(graph, frontier, frontier_neighbors, basic_gates, gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
+                gate_data = apply_gate_operations_and_store_data(graph, frontier, basic_gates, gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
         else:
             # If no mapper is given, the gates are applied directly to the circuit.
             # Only one gate list is supported without gate mapping
             if len(rerouted_gate_list) > 1:
                 raise ValueError("Multiple Gatelists not supported without gate mapping")
-            circuit = apply_gate_function(graph, circuit, frontier, current_gate_list, frontier_neighbors, inverse=inverse)
+            circuit = apply_gate_function(graph, circuit, frontier, current_gate_list, inverse=inverse)
 
             if len(rerouted_gate_list[0])>0: print(f"      Gate extraction with {rerouted_gate_list[0]}")
         gate_list_index += 1
@@ -417,47 +416,52 @@ def apply_gates_to_circuit(graph:BaseGraph,
         # The chosen circuit is then mapped to the architecture and the architecture is returned.
         # The according graph, frontier, and frontier_neighbors are taken from the gate_data dictionary.
         architecture_copy, circuit_index = gate_mapper(mapper, gate_data["circuits"])
-        circuit = QuantumCircuit(len(graph.inputs()))
+        circuit += gate_data["circuits"][circuit_index] #Circuit(len(graph.inputs()))
         graph = gate_data["graphs"][circuit_index]
         frontier = gate_data["frontier"][circuit_index]
-        frontier_neighbors = gate_data["neighbors"][circuit_index]
+        # frontier_neighbors = gate_data["neighbors"][circuit_index]
 
         if len(rerouted_gate_list[circuit_index])>0: print(f"      Gate extraction with {rerouted_gate_list[circuit_index]}")
     
-    return graph, frontier, frontier_neighbors, circuit, architecture_copy
+    return graph, frontier, circuit, architecture_copy
 
 
-def apply_gate_operations_and_store_data(graph:BaseGraph, frontier:Dict[int, VT], frontier_neighbors:List[VT], gate_list:List[ReroutedGate], gate_data:Dict[str, List[Any]], inverse:bool, apply_gate_function:Callable) -> Dict[str, List[Any]]:
+def apply_gate_operations_and_store_data(graph:BaseGraph, frontier:Dict[int, VT], gate_list:List[ReroutedGate], gate_data:Dict[str, List[Any]], inverse:bool, apply_gate_function:Callable) -> Dict[str, List[Any]]:
     """Applies the given gate list to the graph and stores the resulting graph, frontier, and neighbors in the gate_data dictionary."""
 
     graph_copy = graph.clone()
     frontier_copy = frontier.copy()
-    neighbors_copy = frontier_neighbors.copy()
-    c = apply_gate_function(graph_copy, None, frontier_copy, gate_list, neighbors_copy, inverse)
+    # neighbors_copy = frontier_neighbors.copy()
+    c = apply_gate_function(graph_copy, None, frontier_copy, gate_list, inverse)
     gate_data["circuits"].append(c)
     gate_data["graphs"].append(graph_copy)
     gate_data["frontier"].append(frontier_copy)
-    gate_data["neighbors"].append(neighbors_copy)
+    # gate_data["neighbors"].append(neighbors_copy)
 
     return gate_data
 
 
-def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier:Dict[int, VT], rerouted_cnots: List[ReroutedGate], frontier_neighbors:List[VT], inverse:bool=False) -> Circuit|QuantumCircuit:
+def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier:Dict[int, VT], rerouted_cnots: List[ReroutedGate], inverse:bool=False) -> Circuit|QuantumCircuit:
     """Applies the CNOTs to the circuit and returns the updated circuit and graph. If the circuit is a QuantumCircuit, the CNOTs are added using the Qiskit API."""
     
     #CNOT extraction
-    frontier_with_removed = {i: -1 for i in range(len(g.inputs()))}
+    frontier_with_removed = {i: -1 for i in range(len(g.outputs()))}
     frontier_with_removed.update(frontier)
 
     basic_cnots = [rerouted_gate.basic_gate for rerouted_gate in rerouted_cnots]
     
+    frontier_neighbors = list(get_neighbors_of_frontier(g, frontier))
     # Apply basic CNOTs to the matrix to save computation time
     m = bi_adj(g, frontier_neighbors, list(frontier_with_removed.values()))
+    if 33 in frontier_neighbors:
+        import pdb
+        pdb.set_trace()
     for cnot in basic_cnots:
         m.row_add(cnot.control, cnot.target)
 
-    if all(sum(row) != 1 for row in m.data):
-        raise Exception("CNOTs do not suffice to extract a vertex")
+    # this throws an error if we have multiple basic cnots, because then this function gets called multiple times in order to extract a vertex 
+    # if all(sum(row) != 1 for row in m.data):
+    #     raise Exception("CNOTs do not suffice to extract a vertex")
     
     # If we start from the inputs or outputs
     start = g.inputs() if not inverse else g.outputs()
@@ -487,16 +491,16 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
         raise Exception("No extractable vertex found. Something went wrong")
     hads = []
 
-    for qubit, (v, w) in good_verts.items():  # Update frontier vertices
-        hads.append(qubit)
-        # c.add_gate("HAD",qubit_map[v])
-        b = [o for o in g.neighbors(v) if o in start][0]
-        g.remove_vertex(v)
-        g.add_edge(g.edge(w, b))
-        frontier[qubit] = w
+    # for qubit, (v, w) in good_verts.items():  # Update frontier vertices
+    #     hads.append(qubit)
+    #     # c.add_gate("HAD",qubit_map[v])
+    #     b = [o for o in g.neighbors(v) if o in start][0]
+    #     g.remove_vertex(v)
+    #     g.add_edge(g.edge(w, b))
+    #     frontier[qubit] = w
 
     if circuit is None:
-        circuit = QuantumCircuit(len(frontier_with_removed))
+        circuit = Circuit(len(frontier_with_removed))
 
     #TODO: Add parameter to choose between cnot and had+cz+had
     for cnot in cnots:
@@ -510,7 +514,7 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
     return circuit
 
 
-def apply_frontier_gates_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier:Dict[int, VT], rerouted_gates: List[ReroutedGate], frontier_neighbors:List[VT], inverse:bool=False) -> Circuit|QuantumCircuit:
+def apply_frontier_gates_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier:Dict[int, VT], rerouted_gates: List[ReroutedGate], inverse:bool=False) -> Circuit|QuantumCircuit:
     """Applies the gates to the circuit and returns the updated circuit and graph. If the circuit is a QuantumCircuit, the gates are added using the Qiskit API."""
 
     gates = sum(rerouted_gates, [])
@@ -518,7 +522,7 @@ def apply_frontier_gates_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit,
     frontier_with_removed.update(frontier)
 
     if circuit is None:
-        circuit = QuantumCircuit(len(frontier_with_removed))
+        circuit = Circuit(len(frontier_with_removed))
     
     for gate in gates:
         add_gate_to_circuit(circuit=circuit, gate=gate)
@@ -554,16 +558,14 @@ def get_cnot_row_operations(
 
 def get_all_cnot_operations(
         g: BaseGraph, 
-        frontier: Dict[int, VT], 
+        frontier_with_removed: Set[VT],
         frontier_neighbors: Set[VT],
         architecture: Architecture = None        
         ) -> List[List[ReroutedGate]] | None:
     """ Compute row echelon form of adjacency matrix and save row operations as CNOTs 
      -> because of gflow the resulting matrix has a row with only a single 1"""
-    frontier_with_removed = {i: -1 for i in range(len(g.outputs()))}
-    frontier_with_removed.update(frontier)
 
-    m: Mat2 = bi_adj(g, list(frontier_neighbors), frontier_with_removed.values())
+    m: Mat2 = bi_adj(g, list(frontier_neighbors), frontier_with_removed)
     m2: Mat2 = m.copy()
     elim_mode = ElimMode.STEINER_MODE
 
@@ -575,7 +577,7 @@ def get_all_cnot_operations(
         perm = {v: k for k, v in perm.items()}
         neighbors2 = [neighbors[perm[i]] for i in range(len(neighbors))]
 
-        m2 = bi_adj(g, neighbors2, frontier_with_removed.values())
+        m2 = bi_adj(g, neighbors2, frontier_with_removed)
         cnots = []
         m2_no_arch = m2.copy()
 
