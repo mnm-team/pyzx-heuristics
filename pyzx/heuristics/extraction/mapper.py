@@ -101,7 +101,6 @@ def get_circuit_from_mapper(mapper:HybridSynthesisMapper, get_exact_phases:bool=
                 gate.phase = rounded_phase
             else:
                 gate.phase = Fraction().from_float(exact_phase)
-    print(mapper.get_circuit_adjacency_matrix())
     adjacency_matrix = np.array(mapper.get_circuit_adjacency_matrix())
     
     new_arch = Architecture("new_coupling", coupling_matrix=adjacency_matrix)

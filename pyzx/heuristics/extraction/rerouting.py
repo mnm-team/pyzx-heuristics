@@ -151,7 +151,8 @@ def build_connection_from_architecture(architecture: Architecture, gate:Gate) ->
 
     if architecture:
         subgraph_verticies = [architecture.qubit2vertex(qubit) for qubit in [target_qubit]+control_qubits if qubit is not None]
-
+    # import pdb
+    # pdb.set_trace()
     if architecture and not architecture.is_subgraph_connected(subgraph_verticies):
 
         if len(control_qubits) > 1:

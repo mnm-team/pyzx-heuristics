@@ -21,6 +21,7 @@ from pyzx.routing.cnot_mapper import ElimMode
 from pyzx.simplify import apply_rule, full_reduce, pivot, lcomp_with_boundaries
 from pyzx.utils import EdgeType, FractionLike, VertexType, phase_is_true_clifford, toggle_edge
 
+from pyzx.drawing import draw
 
 
 class MCP(Gate):
@@ -234,6 +235,7 @@ def greedy_reduction_with_architecture(m: Mat2, architecture: Architecture) -> O
     """Returns a list of lists of CNOTs that reduce the matrix m to a matrix with only one 1 in at least one row.
     The function uses a greedy algorithm to find the minimal sums of rows that can be added together to reduce the matrix."""
     indices_list_greedy_row_add = find_minimal_sums_with_architecture(m, architecture=None)
+    # print("indices",indices_list_greedy_row_add,"for m",m)
     if indices_list_greedy_row_add == []: return None
 
     row_add_results: List[List[ReroutedGate]] = []
@@ -260,12 +262,14 @@ def greedy_reduction_with_architecture(m: Mat2, architecture: Architecture) -> O
                         reduction = weights[j] - w - cnot_cost
             rerouted_gates = build_connection_from_architecture(architecture, CNOT(best[0], best[1]))
             result.append(ReroutedGate(CNOT(best[0], best[1]), rerouted_gates))
+            # print("result",result)
             control, target = best
             rows[target] = xor_rows(rows[control],rows[target])
             weights[target] = weights[target] - reduction
             indices.remove(control)
 
         row_add_results.append(result)
+        # print("result",row_add_results)
 
     return row_add_results
 
@@ -386,7 +390,6 @@ def apply_gates_to_circuit(graph:BaseGraph,
     If use_gate_mapping is True, the circuit is mapped to the architecture using the given mapper.
     If use_gate_mapping is False, the circuit is updated with the CNOTs directly.
     """
-    
     gate_data = {"circuits": [], "graphs": [], "frontier": [], "neighbors": []}
     gate_list_index = 0
     while gate_list_index < len(rerouted_gate_list):
@@ -395,18 +398,19 @@ def apply_gates_to_circuit(graph:BaseGraph,
             # If a mapper is given, each gate_list is applied to an empty circuit and stored in the gate_data dictionary.
             # The graph, frontier, and frontier_neighbors are updated accordingly and also stored in the gate_data dictionary.
             gate_data = apply_gate_operations_and_store_data(graph, frontier, copy.deepcopy(current_gate_list), gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
-            if current_gate_list and any(rerouted_gate.is_gate_rerouted() for rerouted_gate in current_gate_list):
-                basic_gates = [ReroutedGate(rerouted_gate.basic_gate.copy(), None) for rerouted_gate in current_gate_list]
-                gate_list_index += 1
-                rerouted_gate_list.insert(gate_list_index, basic_gates)
-                gate_data = apply_gate_operations_and_store_data(graph, frontier, basic_gates, gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
+            # print("gate data 1",gate_data)
+            # if current_gate_list and any(rerouted_gate.is_gate_rerouted() for rerouted_gate in current_gate_list):
+            #     basic_gates = [ReroutedGate(rerouted_gate.basic_gate.copy(), None) for rerouted_gate in current_gate_list]
+            #     gate_list_index += 1
+            #     rerouted_gate_list.insert(gate_list_index, basic_gates)
+            #     gate_data = apply_gate_operations_and_store_data(graph, frontier, basic_gates, gate_data, inverse=inverse, apply_gate_function=apply_gate_function)
+            #     print("gate data 2",gate_data)
         else:
             # If no mapper is given, the gates are applied directly to the circuit.
             # Only one gate list is supported without gate mapping
             if len(rerouted_gate_list) > 1:
                 raise ValueError("Multiple Gatelists not supported without gate mapping")
             circuit = apply_gate_function(graph, circuit, frontier, current_gate_list, inverse=inverse)
-
             if len(rerouted_gate_list[0])>0: print(f"      Gate extraction with {rerouted_gate_list[0]}")
         gate_list_index += 1
     
@@ -419,6 +423,7 @@ def apply_gates_to_circuit(graph:BaseGraph,
         circuit += gate_data["circuits"][circuit_index] #Circuit(len(graph.inputs()))
         graph = gate_data["graphs"][circuit_index]
         frontier = gate_data["frontier"][circuit_index]
+        print("applied gates:",gate_data["circuits"][circuit_index].gates)
         # frontier_neighbors = gate_data["neighbors"][circuit_index]
 
         if len(rerouted_gate_list[circuit_index])>0: print(f"      Gate extraction with {rerouted_gate_list[circuit_index]}")
@@ -432,7 +437,7 @@ def apply_gate_operations_and_store_data(graph:BaseGraph, frontier:Dict[int, VT]
     graph_copy = graph.clone()
     frontier_copy = frontier.copy()
     # neighbors_copy = frontier_neighbors.copy()
-    c = apply_gate_function(graph_copy, None, frontier_copy, gate_list, inverse)
+    c = apply_gate_function(graph_copy, Circuit(len(graph.inputs())), frontier_copy, gate_list, inverse)
     gate_data["circuits"].append(c)
     gate_data["graphs"].append(graph_copy)
     gate_data["frontier"].append(frontier_copy)
@@ -445,17 +450,19 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
     """Applies the CNOTs to the circuit and returns the updated circuit and graph. If the circuit is a QuantumCircuit, the CNOTs are added using the Qiskit API."""
     
     #CNOT extraction
-    frontier_with_removed = {i: -1 for i in range(len(g.outputs()))}
-    frontier_with_removed.update(frontier)
+    #TODO: We need frontier_with_removed for keeping track where to add cnots, why does this work in normal pyzx?
+    # frontier_with_removed = {i: -1 for i in range(len(g.outputs()))}
+    # frontier_with_removed.update(frontier)
+    frontier_with_removed = frontier
 
     basic_cnots = [rerouted_gate.basic_gate for rerouted_gate in rerouted_cnots]
     
     frontier_neighbors = list(get_neighbors_of_frontier(g, frontier))
     # Apply basic CNOTs to the matrix to save computation time
     m = bi_adj(g, frontier_neighbors, list(frontier_with_removed.values()))
-    if 33 in frontier_neighbors:
-        import pdb
-        pdb.set_trace()
+    # if 33 in frontier_neighbors:
+    #     import pdb
+    #     pdb.set_trace()
     for cnot in basic_cnots:
         m.row_add(cnot.control, cnot.target)
 
@@ -467,9 +474,9 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
     start = g.inputs() if not inverse else g.outputs()
 
     # Neighbors are padded with -1 since the list cant be shorter than the frontier for connectivity_from_biadj
-    neighbors_copy = frontier_neighbors.copy()
-    for _ in range(len(frontier) - len(frontier_neighbors)):
-        neighbors_copy.append(-1)
+    # neighbors_copy = frontier_neighbors.copy()
+    # for _ in range(len(frontier) - len(frontier_neighbors)):
+    #     neighbors_copy.append(-1)
 
     #Gates are reversed according to paper "there and back again"
     for rerouted_cnot in rerouted_cnots:
@@ -478,7 +485,11 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
     cnots = sum(rerouted_cnots, [])
 
     if len(cnots) > 0:
-        connectivity_from_biadj(g, m, neighbors_copy, list(frontier_with_removed.values()))
+        # if cnots[0].target == 2 and cnots[0].control == 4:
+        #     import pdb
+        #     pdb.set_trace()
+
+        connectivity_from_biadj(g, m, frontier_neighbors, list(frontier_with_removed.values()))
 
     good_verts = dict()
     for i, row in enumerate(m.data):
@@ -489,39 +500,33 @@ def apply_cnots_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier
             good_verts[qubit] = (v, w)
     if not good_verts:
         raise Exception("No extractable vertex found. Something went wrong")
-    hads = []
-
-    # for qubit, (v, w) in good_verts.items():  # Update frontier vertices
-    #     hads.append(qubit)
-    #     # c.add_gate("HAD",qubit_map[v])
-    #     b = [o for o in g.neighbors(v) if o in start][0]
-    #     g.remove_vertex(v)
-    #     g.add_edge(g.edge(w, b))
-    #     frontier[qubit] = w
 
     if circuit is None:
+        print("why?")
+        import pdb
+        pdb.set_trace()
         circuit = Circuit(len(frontier_with_removed))
 
     #TODO: Add parameter to choose between cnot and had+cz+had
+    frontier_qubits = list(frontier.keys())
     for cnot in cnots:
-        add_gate_to_circuit(circuit=circuit, gate=cnot)
-        # c.append(HAD(cnot.target))
-        # c.append(CZ(cnot.control, cnot.target))
-        # c.append(HAD(cnot.target))
-    for h in hads:
-        add_gate_to_circuit(circuit=circuit, gate=HAD(h))
+        circuit_cnot = CNOT(frontier_qubits[cnot.control],frontier_qubits[cnot.target])
+        add_gate_to_circuit(circuit=circuit, gate=circuit_cnot)
 
     return circuit
 
 
 def apply_frontier_gates_to_circuit(g:BaseGraph, circuit:Circuit|QuantumCircuit, frontier:Dict[int, VT], rerouted_gates: List[ReroutedGate], inverse:bool=False) -> Circuit|QuantumCircuit:
     """Applies the gates to the circuit and returns the updated circuit and graph. If the circuit is a QuantumCircuit, the gates are added using the Qiskit API."""
-
+    print("rerouted gates",rerouted_gates)
     gates = sum(rerouted_gates, [])
     frontier_with_removed = {i: -1 for i in range(len(g.inputs()))}
     frontier_with_removed.update(frontier)
 
     if circuit is None:
+        print("why1?")
+        import pdb
+        pdb.set_trace()
         circuit = Circuit(len(frontier_with_removed))
     
     for gate in gates:
@@ -616,7 +621,7 @@ def remove_gadget(
     """Removes a gadget that is attached to a frontier vertex. Returns True if such gadget was found, False otherwise"""
     gadget_set = get_frontier_gadgets(g, frontier)
     removed_gadget = False
-    start = g.inputs() if not inverse else g.outputs()
+    # start = g.inputs() if not inverse else g.outputs()
     
     for root, _ in gadget_set:
         first_frontier_neighbor = [o for o in g.neighbors(root) if o in frontier.values()][0]
@@ -624,7 +629,7 @@ def remove_gadget(
             apply_rule(g, lcomp_with_boundaries, [(root, list(g.neighbors(root)))])  # type: ignore
         else:
             qubit_for_vertex = list(frontier.keys())[list(frontier.values()).index(first_frontier_neighbor)]
-            apply_rule(g, pivot, [(root, first_frontier_neighbor, [], [o for o in g.neighbors(first_frontier_neighbor) if o in start])])  # type: ignore
+            apply_rule(g, pivot, [(root, first_frontier_neighbor, [], [o for o in g.neighbors(first_frontier_neighbor) if o in g.inputs()+g.outputs()])])  # type: ignore
             
             frontier[qubit_for_vertex] = root
 

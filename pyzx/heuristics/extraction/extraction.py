@@ -46,7 +46,6 @@ def create_na_mapper(config_path: str, num_qubits: int):
 
 def extract_with_mapper(g: BaseGraph[VT, ET], mapper: HybridSynthesisMapper, optimize_czs: bool = True):
     orig_circ = extract_circuit(g.copy())
-    print(mapper.get_circuit_adjacency_matrix())
     circuit, architecture = get_circuit_from_mapper(mapper, get_exact_phases=False) #TODO: exact_phase?
     frontier = init_frontier(g, circuit, False)
     while True:
@@ -64,37 +63,56 @@ def extract_with_mapper(g: BaseGraph[VT, ET], mapper: HybridSynthesisMapper, opt
             g, frontier, circuit, architecture = apply_gates_to_circuit(g, circuit, mapper, frontier, [extracted_gates], apply_gate_function=apply_frontier_gates_to_circuit)
             continue
         
-        if not frontier:
+        if not set(g.outputs()).difference(set(frontier.values())):
             break
         print("check gadget")
         # Before CNOT extraction we check if there is a phase gadget in the way
-        if remove_gadget(g, frontier):
-            # There was a gadget in the way. Go back to the top
-            continue
-        
-        #prepare frontier (i.e. add identity between output and frontier vertex if they are connected)
         for v in frontier.values():
             output_neighbor = set(g.outputs()).intersection(set(g.neighbors(v)))
             if output_neighbor:
                 insert_identity(g, output_neighbor.pop(), v)
 
+        if remove_gadget(g, frontier):
+            # There was a gadget in the way. Go back to the top
+            continue
+        #prepare frontier (i.e. add identity between output and frontier vertex if they are connected)
         frontier_neighbors = list(get_neighbors_of_frontier(g, frontier))
         # frontier_with_removed = [v for v in frontier.values() if not set(g.neighbors(v)).intersection(g.outputs())]
-        print("check cnot frontier:",frontier.values(),"frontier neighbors:",frontier_neighbors)
+        # print("check cnot frontier:",frontier.values(),"frontier neighbors:",frontier_neighbors)
         m = bi_adj(g, frontier_neighbors, frontier.values())
-        print(m)
-        if all(sum(row) != 1 for row in m.data):
-            print("have to find cnots")
-            # if 33 in frontier_neighbors:
-            #     import pdb
-            #     pdb.set_trace()
-            rerouted_cnot_list = get_all_cnot_operations(g, frontier.values(), frontier_neighbors, architecture)
-            if not rerouted_cnot_list:
-                print("fatal: no cnots found")
-                return
-            g, frontier, circuit, architecture = apply_gates_to_circuit(g, circuit, mapper, frontier, rerouted_cnot_list, apply_gate_function=apply_cnots_to_circuit)
+        # print("m begin",m)
+        # if all(sum(row) != 1 for row in m.data):
+        print("have to find cnots")
+        # if 33 in frontier_neighbors:
+        """
+        problem is as follows: We need complete frontier to adress correct qubits in extracted circuit
+        desired architecture: one(!) frontier object where all no frontiers have value -1
+        for bi_adj we remove those with value -1?
+        No, why don't we just eliminate the items from the frontier, 
+        the keys should not change, why do they do here?
+        It is not the extracted circuit, it is the remaining graph.
+        Warum funktioniert draw nicht? liegt es an der pyzx version?
+        remaining graph has added 5 2 instead of 4 2
+        """
+        #     import pdb
+        #     pdb.set_trace()
+        rerouted_cnot_list = get_all_cnot_operations(g, frontier.values(), frontier_neighbors, architecture)
+        if not rerouted_cnot_list:
+            print("fatal: no cnots found")
+            return
+
+        g_orig = g.copy()
+        circuit_orig = circuit.copy()
+        g, frontier, circuit, architecture = apply_gates_to_circuit(g, circuit, mapper, frontier, rerouted_cnot_list, apply_gate_function=apply_cnots_to_circuit)
+        if not compare_tensors(orig_circ, circuit+extract_circuit(g.copy())):
+            print("after cnots tensors do not match")
+            import pdb
+            pdb.set_trace()
         else:
-            continue
+            print("after cnots tensors ok")
+        # if 33 in frontier_neighbors:
+        #     import pdb
+        #     pdb.set_trace()
 
     id_simp(g, quiet=True)
 
@@ -261,25 +279,24 @@ def extract_architecture_aware_circuit(
 def extract_frontier_gates(g: BaseGraph[VT, ET], frontier: Dict[int, VT], optimize_czs: bool = True, architecture:Architecture|None = None) -> Tuple[List[ReroutedGate], int]:
     """Remove single qubit gates from the frontier and any CZs between the vertices in the frontier
     Returns the extracted gates and the number of CZs saved if `optimize_czs` is True; otherwise returns 0"""
-    
     single_qubit_gates = get_single_qubit_gates(g, frontier)
     two_qubit_gates, czs_saved = get_two_qubit_gates(g, frontier, optimize_czs, architecture)
 
     return single_qubit_gates+two_qubit_gates, czs_saved
 
-def get_two_qubit_gates(graph:BaseGraph, frontier:Dict[int,VT], optimize_czs:bool, reverse = False, architecture:Architecture|None = None) -> Tuple[List[ReroutedGate], int]:
+def get_two_qubit_gates(graph:BaseGraph, frontier:Dict[int,VT], optimize_czs:bool, architecture:Architecture|None = None) -> Tuple[List[ReroutedGate], int]:
     """Extracts two qubit gates from the frontier and removes them from the graph.
     Returns a list of the extracted two qubit gates."""
-    if reverse:
-        outputs = graph.outputs()
-    else:
-        outputs = graph.inputs()
+
+    outputs = graph.inputs()
 
     czs_saved = 0
     two_qubit_gates = []
     
     cz_mat = Mat2([[0 for i in range(len(outputs))] for j in range(len(outputs))])
     for vertex in frontier.values():
+        # if vertex in graph.outputs():
+        #     continue
         for w in list(graph.neighbors(vertex)):
             if w in frontier.values():
                 vertex_qubit = list(frontier.keys())[list(frontier.values()).index(vertex)]
@@ -315,7 +332,9 @@ def get_two_qubit_gates(graph:BaseGraph, frontier:Dict[int,VT], optimize_czs:boo
                 two_qubit_gates.append(ReroutedGate(CNOT(i,j), None))
 
             overlap_data = max_overlap(cz_mat)
-
+    
+    print("architecture is",architecture)
+    draw(architecture.graph, labels=True)
     for i in range(len(outputs)):
         for j in range(i + 1, len(outputs)):
             if cz_mat.data[i][j] == 1:
@@ -323,7 +342,7 @@ def get_two_qubit_gates(graph:BaseGraph, frontier:Dict[int,VT], optimize_czs:boo
                     two_qubit_gates.append(ReroutedGate(CZ(i,j), build_connection_from_architecture(architecture, CZ(i,j))))
                 else:
                     two_qubit_gates.append(ReroutedGate(CZ(i,j), None))
-    
+
     return two_qubit_gates, czs_saved
 
 def get_single_qubit_gates(graph:BaseGraph, frontier:Dict[int, VT], reverse = False) -> List[ReroutedGate]:
@@ -336,7 +355,9 @@ def get_single_qubit_gates(graph:BaseGraph, frontier:Dict[int, VT], reverse = Fa
     else:
         outputs = graph.inputs()
     single_qubit_gates = []
-    for qubit, vertex in frontier.copy().items():  # First removing single qubit gates
+    for qubit, vertex in frontier.items():  # First removing single qubit gates
+        if vertex in graph.outputs():
+            continue
         b = [w for w in graph.neighbors(vertex) if w in outputs][0]
         e = graph.edge(vertex, b)
         if graph.edge_type(e) == EdgeType.HADAMARD:
@@ -352,12 +373,12 @@ def get_single_qubit_gates(graph:BaseGraph, frontier:Dict[int, VT], reverse = Fa
             if hcount % 2 == 1:
                 single_qubit_gates.append(ReroutedGate(HAD(qubit), None))
             graph.add_edge(graph.edge(neighbors[0],neighbors[1]), EdgeType.SIMPLE)
-            print("rem vert",vertex,"add edge",neighbors[0],neighbors[1])
-            if set(graph.outputs()).intersection(set(neighbors)):
-                print("remove ",qubit,"from frontier")
-                del frontier[qubit]
-            else:
-                frontier[qubit] = neighbors[0] if neighbors[1] in graph.inputs() else neighbors[1]
+            # print("rem vert",vertex,"add edge",neighbors[0],neighbors[1])
+            # if set(graph.outputs()).intersection(set(neighbors)):
+            #     print("remove ",qubit,"from frontier")
+            #     frontier[qubit] = -1
+            # else:
+            frontier[qubit] = neighbors[0] if neighbors[1] in graph.inputs() else neighbors[1]
         
 
     return single_qubit_gates
