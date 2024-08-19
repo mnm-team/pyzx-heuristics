@@ -1,218 +1,137 @@
-import math
-
-from typing import List, Optional, Tuple
-
-from pyzx.circuit.gates import CNOT, Gate
+from pyzx.graph.base import BaseGraph, VT, ET
+from pyzx.circuit.gates import Gate, CNOT
 from pyzx.routing.architecture import Architecture
+from pyzx.linalg import Mat2, Z2
+from pyzx.extract import xor_rows, greedy_reduction, column_optimal_swap, bi_adj, filter_duplicate_cnots
+from typing import List, Dict, Optional, Tuple
+from .extractionutils import get_neighbors_of_frontier
 
 
-class ReroutedGate():
-    """A class that represents a gate that has been rerouted to satisfy the constraints of an architecture
-    Attributes:
-        basic_gate: The original gate that was rerouted
-        gate_path: The path of gates that the basic gate was rerouted to
-    """
-    def __init__(self, basic_gate:Gate, gate_path:List[Gate]|None):
-        """Initializes a ReroutedGate object
-        Args:
-            basic_gate: The original gate that was rerouted
-            gate_path: The path of gates that the basic gate was rerouted to. If None, the gate_path is set to [basic_gate]
-        """
-        self.basic_gate = basic_gate
-        if not gate_path:
-            self.gate_path = [basic_gate.copy()]
-        else:
-            self.gate_path = gate_path
+def calculate_addition_options(g: BaseGraph[VT,ET], frontier: Dict[int,VT], architecture: Architecture) -> List[List[CNOT]]:
+    options = []
+    frontier_vertices_without_outputs = [v for k,v in frontier.items() if not any([n for n in g.neighbors(v) if n in g.outputs()]) and not v in g.outputs()]
+    frontier_neighbors = list(get_neighbors_of_frontier(g,frontier_vertices_without_outputs))
 
-    def is_gate_rerouted(self) -> bool:
-        """Returns True if the gate has been rerouted, False otherwise"""
-        return len(self.gate_path) > 1
-    
-    def reverse_gate_qubits(self):
-        """Reverses the target and control qubits of the basic gate and the gates in the gate path"""
+    m: Mat2 = bi_adj(g, frontier_neighbors, frontier_vertices_without_outputs)
+    # print("calculateaddition biadj",m,frontier_neighbors, frontier_vertices_without_outputs)
+    if all(sum(row) != 1 for row in m.data):
 
-        #TODO: this is a hacky way to do this, should be implemented in the Gate class
-        assert(all(hasattr(gate, "target") and hasattr(gate, "control") for gate in self.gate_path))
-        for gate in self.gate_path:
-            gate.target, gate.control = gate.control, gate.target
+        path_options = greedy_reduction_with_architecture(m, architecture)
+        if path_options:
+            for path in path_options:
+                options.append(path)
+
+        greedy_addition = greedy_reduction(m)
+        if greedy_addition:
+            path = []
+            for cnot in greedy_addition:
+                path.append(CNOT(cnot[1],cnot[0]))
+            if path:
+                options.append(path)
+
+        perm = column_optimal_swap(m)
+        perm = {v: k for k, v in perm.items()}
+        neighbors2 = [frontier_neighbors[perm[i]] for i in range(len(frontier_neighbors))]
+        m2 = bi_adj(g, neighbors2, frontier)
+        standard_cnots = m2.to_cnots(optimize=True)
+        standard_cnots = filter_duplicate_cnots(standard_cnots)
+        if standard_cnots:
+            options.append(standard_cnots)
+
+        #fit options to graph (because removed frontiers change the indexing)
+        adjusted_options = []
+        # print(options)
+        frontier_qubits = list(frontier.values())
+        for option in options:
+            new_option = []
+            for cnot in option:
+                #hacky, could be improved with better frontier structure
+                ctrl = frontier_qubits.index(frontier_vertices_without_outputs[cnot.control])
+                targ = frontier_qubits.index(frontier_vertices_without_outputs[cnot.target])
+                new_option.append(CNOT(ctrl,targ))
+            adjusted_options.append(new_option)
+
+        # print("adjusted",adjusted_options)
         
-        self.basic_gate.target, self.basic_gate.control = self.basic_gate.control, self.basic_gate.target
+        options = adjusted_options
 
-    def is_viable_for_architecture(self, architecture:Architecture) -> bool:
-        """Returns True if the gate path is viable for the given architecture, False otherwise"""
-
-        for gate in self.gate_path:
-            if not hasattr(gate, "target"):
-                raise ValueError("Gate does not have a target qubit")
-            
-            target_qubit = gate.target
-
-            if not hasattr(gate, "control"):
-                if hasattr(gate, "controls"):
-                    control_qubits = gate.controls
-                elif hasattr(gate, "ctrl1") and hasattr(gate, "ctrl2"):
-                    control_qubits = [gate.ctrl1, gate.ctrl2]
-                else:
-                    raise ValueError("Gate does not have controls")
-            else:
-                control_qubits = [gate.control]
-
-            if architecture:
-                subgraph_verticies = [architecture.qubit2vertex(qubit) for qubit in [target_qubit]+control_qubits if qubit is not None]
-
-            if architecture and not architecture.is_subgraph_connected(subgraph_verticies):
-                return False
-
-        return True
+    return options
 
 
-    def __repr__(self) -> str:
-        return f"{self.basic_gate} -> {self.gate_path}"
+def greedy_reduction_with_architecture(m: Mat2, architecture: Architecture) -> Optional[List[List[Gate]]]:
+    """Returns a list of lists of CNOTs that reduce the matrix m to a matrix with only one 1 in at least one row.
+    The function uses a greedy algorithm to find the minimal sums of rows that can be added together to reduce the matrix."""
+    indices_list_greedy_row_add = find_minimal_sums_with_architecture(m, architecture)
+    # print("indices",indices_list_greedy_row_add,"for m",m)
+    if indices_list_greedy_row_add == []: return []
 
-    def __str__(self) -> str:
-        return f"{self.basic_gate} -> {self.gate_path}"
-    
-    def __add__(self, other):
-        return self.gate_path + other.gate_path
-    
-    def __radd__(self, other):
-        return other + self.gate_path
+    row_add_results: List[List[Gate]] = []
+    for indices_greedy_row_add in indices_list_greedy_row_add:
+        indices = list(indices_greedy_row_add)
+        rows = {i:m.data[i] for i in indices}
+        weights: Dict[int,int] = {i: sum(r) for i,r in rows.items()}
+        result: List[Gate] = []
+        while len(indices)>1:
+            best = (-1,-1)
+            reduction = -10000
+            for i in indices:
+                for j in indices:
+                    if j <= i: continue
+                    w = sum(xor_rows(rows[i],rows[j]))
+                    cnot_cost = 1
+                    if j-i > 1:
+                        cnot_cost = 4*(j-i-1)
+                    if weights[i] - w - cnot_cost > reduction:
+                        best = (j,i) # "Add row j to i"
+                        reduction = weights[i] - w - cnot_cost
+                    if weights[j] - w - cnot_cost > reduction:
+                        best = (i,j)
+                        reduction = weights[j] - w - cnot_cost
+            result.append(CNOT(best[0], best[1]))
+            # print("result",result)
+            control, target = best
+            rows[target] = xor_rows(rows[control],rows[target])
+            weights[target] = weights[target] - reduction
+            indices.remove(control)
 
+        row_add_results.append(result)
+        # print("result",row_add_results)
 
-def move_control(gate:Gate, control:int, new_control:int):
-    """Given a gate and a control qubit, returns a new gate with the control qubit replaced with the new control qubit"""
-    gate_copy = gate.copy()
-    if hasattr(gate, "control"):
-        gate_copy.control = new_control
-    elif hasattr(gate, "controls"):
-        gate_copy.controls = [new_control if c == control else c for c in gate.controls]
-    return gate_copy
+    return row_add_results
 
+def find_minimal_sums_with_architecture(m: Mat2, architecture:Architecture, result_amount_limit:int=5, reversed_search=False) -> Optional[Tuple[int, ...]]:
+    """Returns a list of rows in m that can be added together to reduce one of the rows so that
+    it only contains a single 1. Used in :func:`greedy_reduction`"""
 
-def move_target(gate:Gate, new_target:int):
-    """Given a gate and a target qubit, returns a new gate with the target qubit replaced with the new target qubit"""
-    gate_copy = gate.copy()
-    gate_copy.target = new_target
-    return gate_copy
+    results = []
 
-
-def move_control_to_next(architecture:Architecture, path:List[int], gate:Gate) -> List[Gate]:
-    """Given a path of qubits and a gate, returns a list of CNOTs that move the control qubit of the gate along the path"""
-
-    rerouting_result = []
-
-    gate_copy = move_control(gate, path[0], path[-2])
-    
-    for i in range(len(path)-2):
-        rerouting_result.append(CNOT(path[i+1], path[i]))
-        rerouting_result.append(CNOT(path[i], path[i+1]))
-    rerouting_result.extend(build_connection_from_architecture(architecture, gate_copy))
-    for i in range(len(path)-2, 0, -1):
-        rerouting_result.append(CNOT(path[i-1], path[i]))
-        rerouting_result.append(CNOT(path[i], path[i-1]))
-
-    return rerouting_result
-
-
-def move_target_to_control(architecture:Architecture, path:List[int], gate:Gate) -> List[Gate]:
-    """Given a path of qubits and a gate, returns a list of CNOTs that move the target qubit of the gate along the path"""
-
-    rerouting_result = []
-
-    gate_copy = move_target(gate, path[1])
-    
-    for i in range(len(path)-1, 1, -1):
-        rerouting_result.append(CNOT(path[i-1], path[i]))
-        rerouting_result.append(CNOT(path[i], path[i-1]))
-    rerouting_result.extend(build_connection_from_architecture(architecture, gate_copy))
-    for i in range(1, len(path)-1):
-        rerouting_result.append(CNOT(path[i], path[i+1]))
-        rerouting_result.append(CNOT(path[i+1], path[i]))
-
-    return rerouting_result
-
-
-def build_connection_from_architecture(architecture: Architecture, gate:Gate) -> List[Gate]:
-    """Given a gate and an architecture, returns a list of CNOTs that connect the qubits of the gate
-    according to the architecture"""
-
-    if not hasattr(gate, "target"):
-        raise ValueError("Gate does not have a target qubit")
-    
-    target_qubit = gate.target
-
-    if not hasattr(gate, "control"):
-        if not hasattr(gate, "controls"):
-            raise ValueError("Gate does not have controls")
-        else:
-            control_qubits = gate.controls
-    else:
-        control_qubits = [gate.control]
-
-    if architecture:
-        subgraph_verticies = [architecture.qubit2vertex(qubit) for qubit in [target_qubit]+control_qubits if qubit is not None]
-    # import pdb
-    # pdb.set_trace()
-    if architecture and not architecture.is_subgraph_connected(subgraph_verticies):
-
-        if len(control_qubits) > 1:
-            path_dict = {qubit:None for qubit in [target_qubit]+control_qubits}
-
-            for control_qubit_index in range(len(control_qubits)):
-                current_control_qubit = control_qubits[control_qubit_index]
-
-                path_to_target_vertex = architecture.shortest_path(current_control_qubit, target_qubit)
-                path_to_target_qubit = [architecture.vertex2qubit(vertex) for vertex in path_to_target_vertex]
-                if len(path_to_target_qubit) > 2:
-                    if not path_dict[target_qubit] or len(path_dict[target_qubit]) > len(path_to_target_qubit):
-                        path_dict[target_qubit] = path_to_target_qubit
-
-                for next_control_qubit_index in range(control_qubit_index+1, len(control_qubits)):
-                    next_control_qubit = control_qubits[next_control_qubit_index]
-                    path_to_next_control_vertex = architecture.shortest_path(current_control_qubit, next_control_qubit)
-                    path_to_next_control_qubit = [architecture.vertex2qubit(vertex) for vertex in path_to_next_control_vertex]
-
-                    if len(path_to_next_control_qubit) > 2:
-                        if not path_dict[current_control_qubit] or len(path_dict[current_control_qubit]) > len(path_to_next_control_qubit):
-                            path_dict[current_control_qubit] = path_to_next_control_qubit
-            
-            start, min_path = min(path_dict.items(), key=lambda x: len(x[1]) if x[1] else math.inf)
-
-            if not min_path:
-                return [gate]
-
-            if start in control_qubits:
-                return move_control_to_next(architecture, min_path, gate)
-            elif start == target_qubit:
-                return move_target_to_control(architecture, min_path, gate)
-
-        elif len(control_qubits) == 1:
-            shortest_vertex_path = architecture.shortest_path(control_qubits[0], target_qubit)
-            shortest_qubit_path = [architecture.vertex2qubit(vertex) for vertex in shortest_vertex_path]
-
-            if not shortest_vertex_path:
-                raise ValueError("Architecture is not connected")
-            
-            if hasattr(gate, "phase"):
-                return move_control_to_next(architecture, shortest_qubit_path, gate)
-            
-            gate_copy = move_control(gate, control_qubits[0], shortest_qubit_path[-2])
-
-            rerouting_result = []
-            
-            for i in range(len(shortest_qubit_path)-2):
-                rerouting_result.append(CNOT(shortest_qubit_path[i], shortest_qubit_path[i+1]))
-            rerouting_result.append(gate_copy.copy())
-            for i in range(len(shortest_qubit_path)-2, 0, -1):
-                rerouting_result.append(CNOT(shortest_qubit_path[i-1], shortest_qubit_path[i]))
-
-            for i in range(1, len(shortest_qubit_path)-2):
-                rerouting_result.append(CNOT(shortest_qubit_path[i], shortest_qubit_path[i+1]))
-            rerouting_result.append(gate_copy.copy())
-            for i in range(len(shortest_vertex_path)-2, 1, -1):
-                rerouting_result.append(CNOT(shortest_qubit_path[i-1], shortest_qubit_path[i]))
-
-        return rerouting_result
-    else:
-        return [gate]
-
+    r = m.rows()
+    d = m.data
+    if any(sum(r) == 1 for r in d):
+        return tuple()
+    combs:  Dict[Tuple[int, ...], List[Z2]] = {(i,): d[i] for i in range(r)}
+    combs2: Dict[Tuple[int, ...], List[Z2]] = {}
+    iterations = 0
+    while True:
+        combs2 = {}
+        for index, l in combs.items():
+            max_index: int = max(index)
+            rr: range = range(max_index + 1, r) if not reversed_search else range(r - 1, max_index, -1)
+            for k in rr:
+                if architecture and not architecture.is_subgraph_connected([*index]+[k]): continue
+                # Unrolled xor_rows(combs[index],d[k])
+                row: List[Z2] = [0 if v1 == v2 else 1 for v1, v2 in zip(combs[index], d[k])]
+                # row = xor_rows(combs[index],d[k])
+                if sum(row) == 1:
+                    results.append((*index, k))
+                    # return (*index, k)
+                combs2[(*index, k)] = row
+                iterations += 1
+            if iterations > 100000:
+                return results
+        if not combs2:
+            return results
+            # raise ValueError("Irreducible input has been given")
+        if len(results) >= result_amount_limit:
+            return results
+        combs = combs2
