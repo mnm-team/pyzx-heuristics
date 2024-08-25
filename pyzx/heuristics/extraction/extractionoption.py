@@ -152,6 +152,60 @@ class ExtractionOption:
 
         return result_options
     
+    def collect_mcp_options(self, limit_n: int = 5):
+        """collects mcps up to length limit_n"""
+        """
+        Ideen: Jedes Cnp sollte eine einzelne extraction option sein; Kombinationen von cnp gibt es erstmal nicht
+        Für jedes frontier phase gadget wird eine Option erzeugt, bei der mit with_insert Strategie auch phase gadgets ergänzt werden
+        Beste Struktur für gadget dict: keys = frontier_vertices und als values jeweils das root, top tupel?
+        """
+        result_options = [self.copy()] #do nothing
+        gadget_dict = get_exclusive_frontier_gadget_dict(self.g, self.frontier, limit_n)
+        existing_combinations = gadget_dict.keys()
+
+        for current_combination in existing_combinations:
+            root,top = gadget_dict[current_combination]
+            odd_phase = self.g.phase(top) if len(current_combination) % 2 == 1 else -self.g.phase(top)
+            current_option = self.copy()
+
+            for combination in get_remaining_combinations(current_combination):
+                odd = len(combination) % 2 == 1
+                if combination in existing_combinations:
+                    #phase gadget structure exists 
+                    phase = self.g.phase(gadget_dict[combination][1])
+                    if odd and odd_phase == phase or not odd and odd_phase == -phase:
+                        #everything fits; just remove the vertices
+                        current_option.g.remove_vertices(gadget_dict[combination])
+                    else:
+                        #phase gadget stays => update phase
+                        current_option.g.add_to_phase(gadget_dict[combination][1], odd_phase if odd else -odd_phase)
+                else:
+                    #phase gadget structure does not exist; create and set phase
+                    insert_root = current_option.g.add_vertex(VertexType.Z)
+                    insert_top = current_option.g.add_vertex(VertexType.Z, phase=odd_phase if odd else - odd_phase)
+                    current_option.g.add_edge(current_option.g.edge(insert_root, insert_top), EdgeType.HADAMARD)
+                    for neighbor in combination:
+                        current_option.g.add_edge(current_option.g.edge(insert_root, neighbor), EdgeType.HADAMARD)
+            
+            current_option.g.remove_vertices([root,top])
+            
+            #extract gate
+            mcp_phase = odd_phase*(2**(len(current_combination)-1)) % Fraction(2,1)
+            frontier_qubits = [list(self.frontier.values()).index(v) for v in current_combination]
+            current_option.append_gate(CNP(mcp_phase,frontier_qubits))
+            # adjust frontier (i.e. unary phase gadgets)
+            for neighbor in combination:
+                phase = current_option.g.phase(neighbor)
+                if phase != odd_phase:
+                    frontier_qubit = list(self.frontier.values()).index(neighbor)
+                    current_option.append_gate(ZPhase(frontier_qubit, phase-odd_phase))
+                current_option.g.set_phase(neighbor,0)
+            
+            result_options.append(current_option)
+        
+        return result_options
+    
+              
     def copy(self):
         new = ExtractionOption(self.g.clone(), self.frontier.copy(), copy.deepcopy(self.architecture), self.resolved_gadget)
         for gate in self.logical_circuit.gates:

@@ -1,6 +1,10 @@
 from pyzx.graph.base import ET, VT, BaseGraph, VertexType
-
+from pyzx.circuit import Circuit, Gate, CNOT, ZPhase
+from qiskit import QuantumCircuit
 from typing import Dict, Set, List
+import itertools
+from pyzx.utils import FractionLike
+import math
 
 def get_frontier_gadgets(g: BaseGraph, frontier: Dict[int, VT]):
     """Given a graph and a frontier set, returns all phase gadget neighbors of the frontier as a set of tuples (root,top) 
@@ -23,3 +27,97 @@ def get_neighbors_of_frontier(g: BaseGraph[VT, ET], frontier_values: List[VT]) -
         non_start_neighbors = [neighbor for neighbor in g.neighbors(vertex) if g.type(neighbor) == VertexType.Z]
         neighbor_set.update(non_start_neighbors)
     return neighbor_set
+
+def get_exclusive_frontier_gadget_dict(g: BaseGraph[VT,ET], frontier: Dict[int, VT], limit_n: int):
+    """returns a dictionary of all gadgets adjacent to only frontier vertices grouped by their degree 
+    (i.e. to how many frontier vertices the gadget is connected to)"""
+    frontier_gadgets = get_exclusive_frontier_gadgets(g, frontier)
+    gadget_dict = dict()
+    for root, top in frontier_gadgets:
+        neighbors_in_frontier = set(g.neighbors(root)).difference(set([top]))
+        if len(neighbors_in_frontier) <= limit_n:
+            gadget_dict[neighbors_in_frontier] = (root,top)
+
+    return gadget_dict
+
+def get_exclusive_frontier_gadgets(g: BaseGraph, frontier: Dict[int, VT]):
+    """Given a graph and a frontier set, returns all phase gadget neighbors of the frontier as a set of tuples (root,top) 
+    where root is the (phaseless) root spider, and top the 1-ary spider with phase connected to root"""
+    res = set()
+    for v in frontier.values():
+        for n in g.neighbors(v):
+            difference_set = set(g.neighbors(n)).union(set(frontier.values())).difference(set(frontier.values())).difference(set(g.outputs()))
+            if len(difference_set) == 1: 
+                top = difference_set.pop()
+                if len(g.neighbors(top)) == 1:
+                    #if there are no other neighbors than frontier neighbors+ gadget top
+                    res.add((n,top))
+
+    return res
+
+def get_remaining_combinations(combination):
+    """returns all combinations necessary to complete a given phase gadget towards cnp structure"""
+    remaining_combinations = []
+    for degree in range(len(combination)-1,1,-1):
+        remaining_combinations += list(itertools.combinations(combination, degree))
+
+    return remaining_combinations
+
+class CNP(Gate):
+    name = 'MCP'
+    qasm_name = 'mcp'
+    print_phase = True
+    def __init__(self, qubits: List[int], phase: FractionLike) -> None:
+        self.qubits = qubits
+        self.phase = phase
+
+    def to_basic_gates(self):
+        gates = []
+        odd_phase = self.phase/(2**(len(self.qubits)-1))
+        even_phase = -odd_phase
+        for degree in range(2,len(self.qubits)+1):
+            combinations = list(itertools.combinations(self.qubits, degree))
+            for combination in combinations:
+                for idx in range(0,len(combination)-1):
+                    gates.append(CNOT(combination[idx],combination[idx+1]))
+                gates.append(ZPhase(combination[-1], odd_phase if degree % 2 == 1 else even_phase))
+                for idx in range(len(combination)-2,-1,-1):
+                    gates.append(CNOT(combination[idx],combination[idx+1]))
+        for qubit in self.qubits:
+            gates.append(ZPhase(qubit, odd_phase))
+        return gates                
+
+    def to_graph(self, g, q_mapper, c_mapper):
+        for gate in self.to_basic_gates():
+            gate.to_graph(g, q_mapper, c_mapper)
+    
+    def to_qasm(self) -> str:
+        phase = "({}*pi)".format(float(self.phase))
+        if len(self.qubits) == 2:
+            return "cp"+phase+" q["+str(self.qubits[0])+"], q["+str(self.qubits[1])+"];"
+        else:
+            name = "mcp"+str(len(self.qubits))
+            control_string = "".join(["q["+str(control)+"], " for control in self.qubits[:-1]])
+            return name+phase+" "+control_string+" q["+str(self.qubits[-1])+"];"
+        
+
+def convert_to_qiskit(c: Circuit):
+    qc = QuantumCircuit(c.qubits)
+    for gate in c.gates:
+        if gate.name == "HAD":
+            qc.h(gate.target)
+        elif gate.name == "ZPhase":
+            qc.rz(float(gate.phase)*math.pi, gate.target)
+        elif gate.name == "CZ":
+            qc.cz(gate.control, gate.target)
+        elif gate.name == "CNOT":
+            qc.cx(gate.control, gate.target)
+        elif gate.name == "MCP":
+            qc.mcp(float(gate.phase)*math.pi, gate.qubits[:-1], gate.qubits[-1])
+        elif gate.name == "SWAP":
+            qc.swap(gate.control, gate.target)
+        elif gate.name == "U3":
+            qc.u3(float(gate.phases[0])*math.pi, float(gate.phases[1])*math.pi, float(gate.phases[2])*math.pi, gate.target)
+        else:
+            print("unknown gate",gate)
+    return qc

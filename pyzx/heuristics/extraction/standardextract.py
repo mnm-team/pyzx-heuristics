@@ -9,10 +9,10 @@ from mqt.qmap import HybridSynthesisMapper
 
 from typing import Dict, List
 import numpy as np
-from qiskit import QuantumCircuit
 
 from .rerouting import get_neighbors_of_frontier
 from .extractionoption import ExtractionOption
+from .extractionutils import convert_to_qiskit
 
 #debugging stuff
 from pyzx.drawing import draw 
@@ -119,7 +119,7 @@ class HybridMappingExtractor:
     def apply_best_option(self, options: List[ExtractionOption]):
         qiskit_circuits = []
         for option in options:
-            qiskit_circuits.append(QuantumCircuit().from_qasm_str(option.logical_circuit.to_qasm()))
+            qiskit_circuits.append(convert_to_qiskit(option.logical_circuit))
         
         index = self.mapper.evaluate_synthesis_steps(qiskit_circuits, also_map=True)
         print("applied option",index)
