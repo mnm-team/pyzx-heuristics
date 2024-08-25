@@ -12,7 +12,7 @@ from .rerouting import calculate_addition_options
 from .extractionutils import *
 
 
-class CircuitOption:
+class ExtractionOption:
     logical_circuit: Circuit
     g: BaseGraph[VT,ET]
     frontier: Dict[int,VT]
@@ -153,7 +153,7 @@ class CircuitOption:
         return result_options
     
     def copy(self):
-        new = CircuitOption(self.g.clone(), self.frontier.copy(), copy.deepcopy(self.architecture), self.resolved_gadget)
+        new = ExtractionOption(self.g.clone(), self.frontier.copy(), copy.deepcopy(self.architecture), self.resolved_gadget)
         for gate in self.logical_circuit.gates:
             new.logical_circuit.add_gate(gate)
         return new

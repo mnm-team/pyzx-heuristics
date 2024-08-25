@@ -12,7 +12,7 @@ import numpy as np
 from qiskit import QuantumCircuit
 
 from .rerouting import get_neighbors_of_frontier
-from .circuit_option import CircuitOption
+from .extractionoption import ExtractionOption
 
 #debugging stuff
 from pyzx.drawing import draw 
@@ -79,7 +79,7 @@ class HybridMappingExtractor:
             if not set(self.frontier.values()).difference(self.g.outputs()):
                 #resolve remaining swaps
                 swaps = graph_to_swaps(self.g)
-                option = CircuitOption(self.g,self.frontier,self.architecture)
+                option = ExtractionOption(self.g,self.frontier,self.architecture)
                 for swap in swaps:
                     option.logical_circuit.add_gate(swap)
                 self.apply_best_option([option])
@@ -88,13 +88,13 @@ class HybridMappingExtractor:
 
     
     def collect_extraction_options(self, num_it=1):
-        result_options = [CircuitOption(self.g.clone(), self.frontier.copy(), self.architecture)]
+        result_options = [ExtractionOption(self.g.clone(), self.frontier.copy(), self.architecture)]
         for i in range(0,num_it):
             result_options = map(lambda option: option.collect_had_options(), result_options)
             result_options = map(lambda option: option.collect_rz_options(), result_options)
             result_options = list(map(lambda option: option.collect_cz_options(), result_options))
 
-            result_options_gadgets: List[CircuitOption] = []
+            result_options_gadgets: List[ExtractionOption] = []
             for existing_option in result_options:
                 for gadget_option in existing_option.collect_gadget_options(): #gadget options should be optionally, i.e. we do not have to apply it if we dont need to
                     result_options_gadgets.append(gadget_option)
@@ -102,7 +102,7 @@ class HybridMappingExtractor:
             result_options = map(lambda option: option.collect_cz_options(), result_options_gadgets) # in case pivot generated new connections between frontier (impractical for cnot extraction)
             
 
-            result_options_cnots: List[CircuitOption] = []
+            result_options_cnots: List[ExtractionOption] = []
             for existing_option in result_options:
                 for cnot_option in existing_option.collect_cnot_options(): #TODO: cnot should preferably not(!) be optional, but sometimes we need to resolve multiple phase gadgets before cnot addition works.
                     frontier_vertices_without_outputs = [v for k,v in cnot_option.frontier.items() if not any([n for n in cnot_option.g.neighbors(v) if n in cnot_option.g.outputs()])]
@@ -116,7 +116,7 @@ class HybridMappingExtractor:
 
         return result_options
 
-    def apply_best_option(self, options: List[CircuitOption]):
+    def apply_best_option(self, options: List[ExtractionOption]):
         qiskit_circuits = []
         for option in options:
             qiskit_circuits.append(QuantumCircuit().from_qasm_str(option.logical_circuit.to_qasm()))
@@ -133,7 +133,7 @@ class HybridMappingExtractor:
         return index
     
     def clear_initial_hadamards(self):
-        option = CircuitOption(self.g, self.frontier, self.architecture)
+        option = ExtractionOption(self.g, self.frontier, self.architecture)
         for input in option.g.inputs():
             n = list(option.g.neighbors(input))[0]
             if option.g.edge_type(option.g.edge(input,n)) == EdgeType.HADAMARD:
