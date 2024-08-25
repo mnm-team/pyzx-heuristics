@@ -152,8 +152,8 @@ class ExtractionOption:
 
         return result_options
     
-    def collect_mcp_options(self, limit_n: int = 5):
-        """collects mcps up to length limit_n"""
+    def collect_cnp_options(self, limit_n: int = 5):
+        """collects cnps up to length limit_n"""
         """
         Ideen: Jedes Cnp sollte eine einzelne extraction option sein; Kombinationen von cnp gibt es erstmal nicht
         Für jedes frontier phase gadget wird eine Option erzeugt, bei der mit with_insert Strategie auch phase gadgets ergänzt werden
@@ -190,11 +190,11 @@ class ExtractionOption:
             current_option.g.remove_vertices([root,top])
             
             #extract gate
-            mcp_phase = odd_phase*(2**(len(current_combination)-1)) % Fraction(2,1)
+            cnp_phase = odd_phase*(2**(len(current_combination)-1)) % Fraction(2,1)
             frontier_qubits = [list(self.frontier.values()).index(v) for v in current_combination]
-            current_option.append_gate(CNP(mcp_phase,frontier_qubits))
+            current_option.append_gate(CNP(cnp_phase,frontier_qubits))
             # adjust frontier (i.e. unary phase gadgets)
-            for neighbor in combination:
+            for neighbor in current_combination:
                 phase = current_option.g.phase(neighbor)
                 if phase != odd_phase:
                     frontier_qubit = list(self.frontier.values()).index(neighbor)
@@ -204,8 +204,8 @@ class ExtractionOption:
             result_options.append(current_option)
         
         return result_options
-    
-              
+
+
     def copy(self):
         new = ExtractionOption(self.g.clone(), self.frontier.copy(), copy.deepcopy(self.architecture), self.resolved_gadget)
         for gate in self.logical_circuit.gates:

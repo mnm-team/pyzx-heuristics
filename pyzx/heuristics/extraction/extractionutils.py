@@ -36,7 +36,7 @@ def get_exclusive_frontier_gadget_dict(g: BaseGraph[VT,ET], frontier: Dict[int, 
     for root, top in frontier_gadgets:
         neighbors_in_frontier = set(g.neighbors(root)).difference(set([top]))
         if len(neighbors_in_frontier) <= limit_n:
-            gadget_dict[neighbors_in_frontier] = (root,top)
+            gadget_dict[tuple(neighbors_in_frontier)] = (root,top)
 
     return gadget_dict
 
@@ -64,10 +64,10 @@ def get_remaining_combinations(combination):
     return remaining_combinations
 
 class CNP(Gate):
-    name = 'MCP'
-    qasm_name = 'mcp'
+    name = 'CNP'
+    qasm_name = 'cnp'
     print_phase = True
-    def __init__(self, qubits: List[int], phase: FractionLike) -> None:
+    def __init__(self, phase: FractionLike, qubits: List[int]) -> None:
         self.qubits = qubits
         self.phase = phase
 
@@ -96,7 +96,7 @@ class CNP(Gate):
         if len(self.qubits) == 2:
             return "cp"+phase+" q["+str(self.qubits[0])+"], q["+str(self.qubits[1])+"];"
         else:
-            name = "mcp"+str(len(self.qubits))
+            name = "cnp"+str(len(self.qubits))
             control_string = "".join(["q["+str(control)+"], " for control in self.qubits[:-1]])
             return name+phase+" "+control_string+" q["+str(self.qubits[-1])+"];"
         
@@ -112,7 +112,7 @@ def convert_to_qiskit(c: Circuit):
             qc.cz(gate.control, gate.target)
         elif gate.name == "CNOT":
             qc.cx(gate.control, gate.target)
-        elif gate.name == "MCP":
+        elif gate.name == "CNP":
             qc.mcp(float(gate.phase)*math.pi, gate.qubits[:-1], gate.qubits[-1])
         elif gate.name == "SWAP":
             qc.swap(gate.control, gate.target)

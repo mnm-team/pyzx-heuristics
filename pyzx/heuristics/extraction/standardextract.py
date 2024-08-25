@@ -99,6 +99,10 @@ class HybridMappingExtractor:
                 for gadget_option in existing_option.collect_gadget_options(): #gadget options should be optionally, i.e. we do not have to apply it if we dont need to
                     result_options_gadgets.append(gadget_option)
             
+            for existing_option in result_options:
+                for cnp_option in existing_option.collect_cnp_options():
+                    result_options_gadgets.append(cnp_option) #add cnp options alongside gadget options
+            
             result_options = map(lambda option: option.collect_cz_options(), result_options_gadgets) # in case pivot generated new connections between frontier (impractical for cnot extraction)
             
 
