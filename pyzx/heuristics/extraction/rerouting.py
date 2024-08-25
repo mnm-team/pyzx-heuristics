@@ -32,11 +32,12 @@ def calculate_addition_options(g: BaseGraph[VT,ET], frontier: Dict[int,VT], arch
         perm = column_optimal_swap(m)
         perm = {v: k for k, v in perm.items()}
         neighbors2 = [frontier_neighbors[perm[i]] for i in range(len(frontier_neighbors))]
-        m2 = bi_adj(g, neighbors2, frontier)
-        standard_cnots = m2.to_cnots(optimize=True)
-        standard_cnots = filter_duplicate_cnots(standard_cnots)
-        if standard_cnots:
-            options.append(standard_cnots)
+        m2 = bi_adj(g, neighbors2, frontier_vertices_without_outputs)
+        if m2.data:
+            standard_cnots = m2.to_cnots(optimize=True)
+            standard_cnots = filter_duplicate_cnots(standard_cnots)
+            if standard_cnots:
+                options.append(standard_cnots)
 
         #fit options to graph (because removed frontiers change the indexing)
         adjusted_options = []
