@@ -1,7 +1,8 @@
 from pyzx.graph.base import ET, VT, BaseGraph, VertexType
 from pyzx.circuit import Circuit, Gate, CNOT, ZPhase
+from pyzx.linalg import CNOTMaker
 from qiskit import QuantumCircuit
-from typing import Dict, Set, List
+from typing import Dict, Set, List, Optional
 import itertools
 from pyzx.utils import FractionLike
 import math
@@ -121,3 +122,28 @@ def convert_to_qiskit(c: Circuit):
         else:
             print("unknown gate",gate)
     return qc
+
+def to_cnots(matrix, optimize: bool = False, use_log_blocksize: bool = False) -> List[CNOT]:
+    """
+    Copy of pyzx function. Since we here sometimes input a non reversible matrix, we want to return an empty list instead of raising an exception
+    Returns a list of CNOTs that implements the matrix as a reversible circuit of qubits."""
+    cn: Optional[CNOTMaker]
+    if not optimize:
+        cn = CNOTMaker()
+        blocksize = 5
+        if use_log_blocksize:
+            blocksize = int(math.log2(matrix.rows()))
+        matrix.copy().gauss(full_reduce=True,x=cn, blocksize=blocksize)
+    else:
+        best = 1000000
+        best_cn = None
+        for size in range(1,matrix.rows()):
+            cn = CNOTMaker()
+            matrix.copy().gauss(full_reduce=True,x=cn, blocksize=size)
+            if len(cn.cnots) < best:
+                best = len(cn.cnots)
+                best_cn = cn
+        cn = best_cn
+    if not cn:
+        return []
+    return cn.cnots

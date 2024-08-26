@@ -4,7 +4,7 @@ from pyzx.routing.architecture import Architecture
 from pyzx.linalg import Mat2, Z2
 from pyzx.extract import xor_rows, greedy_reduction, column_optimal_swap, bi_adj, filter_duplicate_cnots
 from typing import List, Dict, Optional, Tuple
-from .extractionutils import get_neighbors_of_frontier
+from .extractionutils import get_neighbors_of_frontier, to_cnots
 
 
 def calculate_addition_options(g: BaseGraph[VT,ET], frontier: Dict[int,VT], architecture: Architecture) -> List[List[CNOT]]:
@@ -34,7 +34,7 @@ def calculate_addition_options(g: BaseGraph[VT,ET], frontier: Dict[int,VT], arch
         neighbors2 = [frontier_neighbors[perm[i]] for i in range(len(frontier_neighbors))]
         m2 = bi_adj(g, neighbors2, frontier_vertices_without_outputs)
         if m2.data:
-            standard_cnots = m2.to_cnots(optimize=True)
+            standard_cnots = to_cnots(m2, optimize=True)
             standard_cnots = filter_duplicate_cnots(standard_cnots)
             if standard_cnots:
                 options.append(standard_cnots)
