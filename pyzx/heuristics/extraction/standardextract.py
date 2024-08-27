@@ -59,10 +59,10 @@ class HybridMappingExtractor:
                 #But it can happen if we need to resolve multiple phase gadgets before cnot addition works.
                 import pdb
                 pdb.set_trace()
-            for i,option in enumerate(extraction_options):
-                print("option",i)
-                draw(option.g)
-                draw(option.logical_circuit)
+            # for i,option in enumerate(extraction_options):
+            #     print("option",i)
+            #     draw(option.g)
+            #     draw(option.logical_circuit)
             self.apply_best_option(extraction_options)
             
             #debugging stuff
@@ -71,10 +71,12 @@ class HybridMappingExtractor:
             draw(self.c)
             print(self.frontier)
             print("\n\n\n NEW ITERATION:")
-            if not compare_tensors(orig_circ,self.c+extract_circuit(self.g.copy())):
-                print("tensors do not match")
-                import pdb
-                pdb.set_trace()
+            # import pdb
+            # pdb.set_trace()
+            # if not compare_tensors(orig_circ,self.c+extract_circuit(self.g.copy())):
+            #     print("tensors do not match")
+            #     import pdb
+            #     pdb.set_trace()
 
             if not set(self.frontier.values()).difference(self.g.outputs()):
                 #resolve remaining swaps
@@ -109,11 +111,15 @@ class HybridMappingExtractor:
             result_options_cnots: List[ExtractionOption] = []
             for existing_option in result_options:
                 for cnot_option in existing_option.collect_cnot_options(): #TODO: cnot should preferably not(!) be optional, but sometimes we need to resolve multiple phase gadgets before cnot addition works.
-                    frontier_vertices_without_outputs = [v for k,v in cnot_option.frontier.items() if not any([n for n in cnot_option.g.neighbors(v) if n in cnot_option.g.outputs()])]
+                    frontier_vertices_without_outputs = [v for k,v in cnot_option.frontier.items() if not v in cnot_option.g.outputs()]
                     frontier_neighbors = list(get_neighbors_of_frontier(cnot_option.g,frontier_vertices_without_outputs))
                     biadj_m = bi_adj(cnot_option.g, frontier_neighbors, frontier_vertices_without_outputs)
-                    if any(sum(row) == 1 for row in biadj_m.data) or cnot_option.resolved_gadget or not frontier_neighbors:
-                        #kick out options where all biadjacency rows are > 1 and no gadget transformation has happened to prevent non-termination
+                    if (any(sum(row) == 1 for row in biadj_m.data) and not cnot_option.unchanged) or not frontier_neighbors:
+                        # print("cnot option",cnot_option, cnot_option.unchanged,frontier_neighbors)
+                        # if cnot_option.unchanged:
+                        #     import pdb
+                        #     pdb.set_trace()
+                        #kick out options where all biadjacency rows are > 1 or nothing has happened to prevent non-termination
                         result_options_cnots.append(cnot_option)
             
             result_options = result_options_cnots
@@ -122,19 +128,35 @@ class HybridMappingExtractor:
 
     def apply_best_option(self, options: List[ExtractionOption]):
         qiskit_circuits = []
+        edges = []
         for option in options:
+            edges.append(option.g.num_edges()) #could filter explicitly for hadamard wires.
             qiskit_circuits.append(convert_to_qiskit(option.logical_circuit))
         
-        index = self.mapper.evaluate_synthesis_steps(qiskit_circuits, also_map=True)
-        print("applied option",index)
-        self.g = options[index].g.clone()
-        self.c += options[index].logical_circuit.copy()
-        self.frontier = options[index].frontier.copy()
+        fidelities = self.mapper.evaluate_synthesis_steps(qiskit_circuits, also_map=False)
+        best = 0
+        best_index = 0
+        
+        # import pdb
+        # pdb.set_trace()
+        for idx, fidelity in enumerate(fidelities):
+            combined_cost = fidelity + (self.g.num_edges()-len(self.frontier)-edges[idx])*0.003
+            if combined_cost > best:
+                best = combined_cost
+                best_index = idx
+        print("edges", list(enumerate(edges)))
+        print("fidelities: ",list(enumerate(fidelities)))
+        print("combined cost", list(enumerate([fidelities[idx] + (self.g.num_edges()-len(self.frontier)-edges[idx])*0.005 for idx in range(len(edges))])))
+        self.mapper.append_with_mapping(qiskit_circuits[best_index])    
+        print("applied option",best_index)
+        self.g = options[best_index].g.clone()
+        self.c += options[best_index].logical_circuit.copy()
+        self.frontier = options[best_index].frontier.copy()
 
         adjacency_matrix = np.array(self.mapper.get_circuit_adjacency_matrix())
         self.architecture = Architecture("new_coupling", coupling_matrix=adjacency_matrix, qubit_map=list(range(self.c.qubits)))
 
-        return index
+        return best_index
     
     def clear_initial_hadamards(self):
         option = ExtractionOption(self.g, self.frontier, self.architecture)
