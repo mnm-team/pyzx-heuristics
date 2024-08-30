@@ -209,7 +209,25 @@ class ExtractionOption:
             result_options.append(current_option)
         
         return result_options
-
+    
+    def eliminate_unary_phase_gadgets(self):
+        """checks whether there are unary phase gadgets left in the diagram, that is phase gadgets which have only a single neighbor"""
+        while True:
+            change = False
+            for v in set(self.g.vertices()).difference(set(self.frontier.values())):
+                
+                n = list(self.g.neighbors(v))
+                if len(n) == 1 and self.g.phase(n[0]) == 0 and self.g.type(v) == VertexType.Z and self.g.type(n[0]) == VertexType.Z:
+                    n2 = set(self.g.neighbors(n[0])).difference(set([v]))
+                    if len(n2) == 1:
+                        root = n2.pop()
+                        self.g.set_phase(root, self.g.phase(root)+self.g.phase(v))
+                        self.g.remove_vertices([v,n[0]])
+                        change = True
+                        break
+            if not change:
+                break
+        return self
 
     def copy(self):
         new = ExtractionOption(self.g.clone(), self.frontier.copy(), copy.deepcopy(self.architecture), self.unchanged)

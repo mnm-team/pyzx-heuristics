@@ -25,14 +25,16 @@ class HybridMappingExtractor:
     c: Circuit
     mapper: HybridSynthesisMapper
     architecture: Architecture
+    edge_bias: float
 
-    def __init__(self, graph: BaseGraph[VT,ET], mapper: HybridSynthesisMapper) -> None:
+    def __init__(self, graph: BaseGraph[VT,ET], mapper: HybridSynthesisMapper, edge_bias=0.005) -> None:
         self.g = graph.copy()
         if len(graph.inputs()) != len(graph.outputs()):
             raise Exception("Can only extract graphs with same number of inputs and outputs")
         self.mapper = mapper
         self.c = Circuit(len(graph.inputs()))
         self.architecture = Architecture("coupling", coupling_matrix=np.array(mapper.get_circuit_adjacency_matrix()))
+        self.edge_bias = edge_bias
         # self.c, self.architecture = get_circuit_from_mapper(self.mapper, get_exact_phases=False)
         self.init_frontier()
 
@@ -45,7 +47,7 @@ class HybridMappingExtractor:
             if not v in self.g.outputs():
                 self.frontier[i] = v
     
-    def extract(self, num_it=1) -> Circuit:
+    def extract(self, num_it=1, up_to_perm=False) -> Circuit:
         orig_g = self.g.copy() #debugging stuff
         orig_circ = extract_circuit(orig_g.copy()) #debugging stuff
 
@@ -66,11 +68,11 @@ class HybridMappingExtractor:
             self.apply_best_option(extraction_options)
             
             #debugging stuff
-            print("resulting graph:")
-            draw(self.g, labels=True, scale=40)
-            draw(self.c)
-            print(self.frontier)
-            print("\n\n\n NEW ITERATION:")
+            # print("resulting graph:")
+            # draw(self.g, labels=True, scale=40)
+            # draw(self.c)
+            # print(self.frontier)
+            # print("\n\n\n NEW ITERATION:")
             # import pdb
             # pdb.set_trace()
             # if not compare_tensors(orig_circ,self.c+extract_circuit(self.g.copy())):
@@ -80,7 +82,7 @@ class HybridMappingExtractor:
 
             if not set(self.frontier.values()).difference(self.g.outputs()):
                 #resolve remaining swaps
-                swaps = graph_to_swaps(self.g)
+                swaps = graph_to_swaps(self.g, no_swaps=up_to_perm)
                 option = ExtractionOption(self.g,self.frontier,self.architecture)
                 for swap in swaps:
                     option.logical_circuit.add_gate(swap)
@@ -92,6 +94,7 @@ class HybridMappingExtractor:
     def collect_extraction_options(self, num_it=1):
         result_options = [ExtractionOption(self.g.clone(), self.frontier.copy(), self.architecture)]
         for i in range(0,num_it):
+            result_options = map(lambda option: option.eliminate_unary_phase_gadgets(), result_options)
             result_options = map(lambda option: option.collect_had_options(), result_options)
             result_options = map(lambda option: option.collect_rz_options(), result_options)
             result_options = list(map(lambda option: option.collect_cz_options(), result_options))
@@ -111,10 +114,10 @@ class HybridMappingExtractor:
             result_options_cnots: List[ExtractionOption] = []
             for existing_option in result_options:
                 for cnot_option in existing_option.collect_cnot_options(): #TODO: cnot should preferably not(!) be optional, but sometimes we need to resolve multiple phase gadgets before cnot addition works.
-                    frontier_vertices_without_outputs = [v for k,v in cnot_option.frontier.items() if not v in cnot_option.g.outputs()]
+                    frontier_vertices_without_outputs = [v for k,v in cnot_option.frontier.items() if not any([n for n in cnot_option.g.neighbors(v) if n in cnot_option.g.outputs()]) and not v in cnot_option.g.outputs()]
                     frontier_neighbors = list(get_neighbors_of_frontier(cnot_option.g,frontier_vertices_without_outputs))
                     biadj_m = bi_adj(cnot_option.g, frontier_neighbors, frontier_vertices_without_outputs)
-                    if (any(sum(row) == 1 for row in biadj_m.data) and not cnot_option.unchanged) or not frontier_neighbors:
+                    if (any(sum(row) == 1 for row in biadj_m.data) and not cnot_option.unchanged) or not list(get_neighbors_of_frontier(cnot_option.g,cnot_option.frontier.values())):
                         # print("cnot option",cnot_option, cnot_option.unchanged,frontier_neighbors)
                         # if cnot_option.unchanged:
                         #     import pdb
@@ -131,8 +134,9 @@ class HybridMappingExtractor:
         edges = []
         for option in options:
             edges.append(option.g.num_edges()) #could filter explicitly for hadamard wires.
-            qiskit_circuits.append(convert_to_qiskit(option.logical_circuit))
-        
+            qiskit_circuits.append(convert_to_qiskit(self.c+option.logical_circuit))
+        #TODO: letzte 10 Gatter mit berücksichtigen? Oder gleich gesamten Schaltkreis? Oder nichts? Alles macht einen Unterschied für einzelne Schaltkreise
+
         fidelities = self.mapper.evaluate_synthesis_steps(qiskit_circuits, also_map=False)
         best = 0
         best_index = 0
@@ -140,14 +144,15 @@ class HybridMappingExtractor:
         # import pdb
         # pdb.set_trace()
         for idx, fidelity in enumerate(fidelities):
-            combined_cost = fidelity + (self.g.num_edges()-len(self.frontier)-edges[idx])*0.003
+            combined_cost = fidelity + (self.g.num_edges()-len(self.frontier)-edges[idx])*self.edge_bias
             if combined_cost > best:
                 best = combined_cost
                 best_index = idx
-        print("edges", list(enumerate(edges)))
-        print("fidelities: ",list(enumerate(fidelities)))
-        print("combined cost", list(enumerate([fidelities[idx] + (self.g.num_edges()-len(self.frontier)-edges[idx])*0.005 for idx in range(len(edges))])))
-        self.mapper.append_with_mapping(qiskit_circuits[best_index])    
+        # print("edges", list(enumerate(edges)))
+        # print("fidelities: ",list(enumerate(fidelities)))
+        # print("combined cost", list(enumerate([fidelities[idx] + (self.g.num_edges()-len(self.frontier)-edges[idx])*self.edge_bias for idx in range(len(edges))])))
+        self.mapper.append_with_mapping(convert_to_qiskit(options[best_index].logical_circuit))
+
         print("applied option",best_index)
         self.g = options[best_index].g.clone()
         self.c += options[best_index].logical_circuit.copy()

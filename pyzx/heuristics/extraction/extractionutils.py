@@ -36,7 +36,7 @@ def get_exclusive_frontier_gadget_dict(g: BaseGraph[VT,ET], frontier: Dict[int, 
     gadget_dict = dict()
     for root, top in frontier_gadgets:
         neighbors_in_frontier = set(g.neighbors(root)).difference(set([top]))
-        if len(neighbors_in_frontier) <= limit_n:
+        if len(neighbors_in_frontier) <= limit_n and len(neighbors_in_frontier) > 1:
             gadget_dict[tuple(neighbors_in_frontier)] = (root,top)
 
     return gadget_dict
