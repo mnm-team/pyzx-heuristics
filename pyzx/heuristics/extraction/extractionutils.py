@@ -4,7 +4,7 @@ from pyzx.linalg import CNOTMaker
 from qiskit import QuantumCircuit
 from typing import Dict, Set, List, Optional
 import itertools
-from pyzx.utils import FractionLike
+from pyzx.utils import FractionLike, Fraction
 import math
 
 def get_frontier_gadgets(g: BaseGraph, frontier: Dict[int, VT]):
@@ -147,3 +147,35 @@ def to_cnots(matrix, optimize: bool = False, use_log_blocksize: bool = False) ->
     if not cn:
         return []
     return cn.cnots
+
+def convert_mapped_circuit(qasm_circuit, num_qubits, initial_mapping=None):
+    c = Circuit(num_qubits)
+    if initial_mapping:
+        qubit_list = initial_mapping
+    else:
+        qubit_list = [-1 for _ in range(0,num_qubits)]
+    unoccupied = 0
+    for gate in qasm_circuit.split(';\n')[3:]:
+        components = gate.split(' ')
+        gatename = components[0]
+        qubits = [int(qubit.translate({ord(c): None for c in 'q[],'})) for qubit in components[1:]]
+        for qubit in qubits:
+            if not gatename == 'move' and not qubit in qubit_list:
+                qubit_list[unoccupied] = qubit
+                unoccupied += 1
+
+        if gatename == 'h':
+            c.add_gate('HAD',qubit_list.index(qubits[0]))
+        elif gatename == 'cz':
+            c.add_gate('CZ',qubit_list.index(qubits[0]), qubit_list.index(qubits[1]))
+        elif gatename == 'swap':
+            c.add_gate('SWAP',qubit_list.index(qubits[0]), qubit_list.index(qubits[1]))
+        elif gatename == 'move':
+            qubit_list[qubit_list.index(qubits[0])] = qubits[1]
+        elif 'rz' in gatename:
+            angle = float(gatename.split('(')[1][:-1])
+            # import pdb
+            # pdb.set_trace()
+            c.add_gate('ZPhase', qubit_list.index(qubits[0]), round(angle/math.pi,14))
+
+    return c
