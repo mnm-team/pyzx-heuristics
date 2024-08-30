@@ -174,8 +174,6 @@ def convert_mapped_circuit(qasm_circuit, num_qubits, initial_mapping=None):
             qubit_list[qubit_list.index(qubits[0])] = qubits[1]
         elif 'rz' in gatename:
             angle = float(gatename.split('(')[1][:-1])
-            # import pdb
-            # pdb.set_trace()
             c.add_gate('ZPhase', qubit_list.index(qubits[0]), round(angle/math.pi,14))
 
     return c
