@@ -107,8 +107,12 @@ def convert_to_qiskit(c: Circuit):
     for gate in c.gates:
         if gate.name == "HAD":
             qc.h(gate.target)
-        elif gate.name == "ZPhase":
+        elif gate.name in ["ZPhase","S","T"]:
             qc.rz(float(gate.phase)*math.pi, gate.target)
+        elif gate.name == "Z":
+            qc.z(gate.target)
+        elif gate.name in ["X","NOT"]:
+            qc.x(gate.target)
         elif gate.name == "CZ":
             qc.cz(gate.control, gate.target)
         elif gate.name == "CNOT":
@@ -155,7 +159,7 @@ def convert_mapped_circuit(qasm_circuit, num_qubits, initial_mapping=None):
     else:
         qubit_list = [-1 for _ in range(0,num_qubits)]
     unoccupied = 0
-    for gate in qasm_circuit.split(';\n')[3:]:
+    for gate in qasm_circuit.split(';\n')[3:-1]:
         components = gate.split(' ')
         gatename = components[0]
         qubits = [int(qubit.translate({ord(c): None for c in 'q[],'})) for qubit in components[1:]]
@@ -166,6 +170,10 @@ def convert_mapped_circuit(qasm_circuit, num_qubits, initial_mapping=None):
 
         if gatename == 'h':
             c.add_gate('HAD',qubit_list.index(qubits[0]))
+        elif gatename == 'cnp':
+            angle = float(gatename.split('(')[1][:-1])
+            mapped_qubits = [qubit_list.index(q) for q in qubit_list]
+            c.add_gate(CNP(angle,mapped_qubits))
         elif gatename == 'cz':
             c.add_gate('CZ',qubit_list.index(qubits[0]), qubit_list.index(qubits[1]))
         elif gatename == 'swap':
@@ -175,5 +183,11 @@ def convert_mapped_circuit(qasm_circuit, num_qubits, initial_mapping=None):
         elif 'rz' in gatename:
             angle = float(gatename.split('(')[1][:-1])
             c.add_gate('ZPhase', qubit_list.index(qubits[0]), round(angle/math.pi,14))
+        elif 'cp' in gatename:
+            angle = Fraction(gatename.split('(')[1][:-1].replace('pi','1'))
+            mapped_qubits = [qubit_list.index(q) for q in qubits]
+            c.add_gate(CNP(angle,mapped_qubits))
+        else:
+            print("unkown gate",gatename)
 
     return c
