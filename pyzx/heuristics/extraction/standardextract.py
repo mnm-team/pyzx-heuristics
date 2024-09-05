@@ -134,7 +134,9 @@ class HybridMappingExtractor:
         edges = []
         for option in options:
             edges.append(option.g.num_edges()) #could filter explicitly for hadamard wires.
-            qiskit_circuits.append(convert_to_qiskit(self.c+option.logical_circuit))
+            # qiskit_circuits.append(convert_to_qiskit(self.c+option.logical_circuit))
+            qiskit_circuits.append(convert_to_qiskit(option.logical_circuit))
+
         #TODO: letzte 10 Gatter mit berücksichtigen? Oder gleich gesamten Schaltkreis? Oder nichts? Alles macht einen Unterschied für einzelne Schaltkreise
 
         fidelities = self.mapper.evaluate_synthesis_steps(qiskit_circuits, also_map=False)

@@ -28,6 +28,12 @@ def evaluate_circuit(c: Circuit, params):
     for k,v in mapper_pyzx.schedule().items():
         data["pyzx_"+k] = v
     
+    mapper_standard = create_na_mapper(params['config_path']+architecture_name, len(g.inputs()))
+    qc = convert_to_qiskit(c)
+    mapper_standard.append_with_mapping(qc)
+    for k,v in mapper_standard.schedule().items():
+        data["standard_"+k] = v
+    
     print(data)
     
     for edge_bias in params['edge_bias']:
@@ -62,8 +68,11 @@ def evaluate_benchmark_circuits(benchmark='feyn'):
             #skip some very large circuits
             continue
         print("eval",filename)
-        circ_data = evaluate_circuit(circuit, params)
-        circ_data['name'] = filename
+        try:
+            circ_data = evaluate_circuit(circuit, params)
+            circ_data['name'] = filename
+        except:
+            continue
 
         data = pd.concat([data,circ_data],ignore_index=True)
     
@@ -77,7 +86,7 @@ def generate_feynman_circuits():
     directory = '../../../../../neutral-atom-gate-decomposer/feyn_bench/'
     for filename in os.listdir(directory):
         f = os.path.join(directory, filename)
-        if os.path.getsize(f) > 1000:
+        if os.path.getsize(f) > 10000:
             print("file too large, skip",f)
             continue
         try:
