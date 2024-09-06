@@ -12,7 +12,7 @@ import numpy as np
 
 from .rerouting import get_neighbors_of_frontier
 from .extractionoption import ExtractionOption
-from .extractionutils import convert_to_qiskit
+from .extractionutils import convert_to_qiskit, optimize_czs_in_frontier
 
 #debugging stuff
 from pyzx.drawing import draw 
@@ -94,22 +94,46 @@ class HybridMappingExtractor:
     def collect_extraction_options(self, num_it=1):
         result_options = [ExtractionOption(self.g.clone(), self.frontier.copy(), self.architecture)]
         for i in range(0,num_it):
-            result_options = map(lambda option: option.eliminate_unary_phase_gadgets(), result_options)
-            result_options = map(lambda option: option.collect_had_options(), result_options)
-            result_options = map(lambda option: option.collect_rz_options(), result_options)
-            result_options = list(map(lambda option: option.collect_cz_options(), result_options))
+            
+            
+            # result_options = [single_option for option in result_options for single_option in option.collect_cnp_options()]
+            # result_options_gadgets: List[ExtractionOption] = []
+            # for existing_option in result_options:
+            #     for gadget_option in existing_option.collect_gadget_options(): #gadget options should be optionally, i.e. we do not have to apply it if we dont need to
+            #         result_options_gadgets.append(gadget_option)
+            # # print("aftergadget", len(result_options_gadgets))
+            # for existing_option in result_options:
+            #     for cnp_option in existing_option.collect_cnp_options():
+            #         result_options_gadgets.append(cnp_option) #add cnp options alongside gadget options
+            # result_options = result_options_gadgets
+            changes = True
+            while changes:
+                for option in result_options:
+                    #reset
+                    option.rz_cz_had_unchanged = True
 
-            result_options_gadgets: List[ExtractionOption] = []
-            for existing_option in result_options:
-                for gadget_option in existing_option.collect_gadget_options(): #gadget options should be optionally, i.e. we do not have to apply it if we dont need to
-                    result_options_gadgets.append(gadget_option)
+                result_options = [option.eliminate_unary_phase_gadgets() for option in result_options]
+                result_options = [option.collect_had_options() for option in result_options]
+                result_options = [option.collect_rz_options() for option in result_options]
+                for option in result_options:
+                    optimize_czs_in_frontier(option.g,option.frontier)
+                result_options = [option.collect_cz_options() for option in result_options]
+                changes = False
+                for option in result_options:
+                    if not option.rz_cz_had_unchanged:
+                        changes = True
+            #     print("inwhile")
+            # print("outwhile")                
             
-            for existing_option in result_options:
-                for cnp_option in existing_option.collect_cnp_options():
-                    result_options_gadgets.append(cnp_option) #add cnp options alongside gadget options
-            
-            result_options = map(lambda option: option.collect_cz_options(), result_options_gadgets) # in case pivot generated new connections between frontier (impractical for cnot extraction)
-            
+            reiterate_options = []
+            for option in result_options:
+                reiterate_options += option.collect_cnp_options()
+                reiterate_options += option.collect_gadget_options()
+            result_options = reiterate_options
+                        
+            # print("aftercnp", len(result_options_gadgets))
+
+            result_options = [option.collect_cz_options() for option in result_options]
 
             result_options_cnots: List[ExtractionOption] = []
             for existing_option in result_options:
@@ -117,14 +141,22 @@ class HybridMappingExtractor:
                     frontier_vertices_without_outputs = [v for k,v in cnot_option.frontier.items() if not any([n for n in cnot_option.g.neighbors(v) if n in cnot_option.g.outputs()]) and not v in cnot_option.g.outputs()]
                     frontier_neighbors = list(get_neighbors_of_frontier(cnot_option.g,frontier_vertices_without_outputs))
                     biadj_m = bi_adj(cnot_option.g, frontier_neighbors, frontier_vertices_without_outputs)
-                    if (any(sum(row) == 1 for row in biadj_m.data) and not cnot_option.unchanged) or not list(get_neighbors_of_frontier(cnot_option.g,cnot_option.frontier.values())):
+                    if (any(sum(row) == 1 for row in biadj_m.data) and not cnot_option.gadget_cnot_unchanged) or not list(get_neighbors_of_frontier(cnot_option.g,cnot_option.frontier.values())):
+                        # wenn wir eine 1er Reihe haben und eine Veränderung oder es keine frontier neighbors mehr gibt
+                        # ist es eine valide Option. Was schließt es aus? Wenn wir keine Veränderung haben und es eine 1er Reihe gibt
+                        # not cnot_option.unchanged = cnot_option.changed mehr oder weniger.
+                        # Eigentlich müssen nur in jedem Schritt mindestens entweder ein gadget oder ein cnot extrahiert werden, was passiert wenn had rz cz nicht zu unchanged reinzählen
                         # print("cnot option",cnot_option, cnot_option.unchanged,frontier_neighbors)
                         # if cnot_option.unchanged:
                         #     import pdb
                         #     pdb.set_trace()
                         #kick out options where all biadjacency rows are > 1 or nothing has happened to prevent non-termination
                         result_options_cnots.append(cnot_option)
-            
+                        # print("appended ",cnot_option)
+            # print("aftercnot")
+            if len(result_options_cnots) < 1:
+                import pdb
+                pdb.set_trace()
             result_options = result_options_cnots
 
         return result_options
@@ -155,7 +187,7 @@ class HybridMappingExtractor:
         # print("combined cost", list(enumerate([fidelities[idx] + (self.g.num_edges()-len(self.frontier)-edges[idx])*self.edge_bias for idx in range(len(edges))])))
         self.mapper.append_with_mapping(convert_to_qiskit(options[best_index].logical_circuit))
 
-        print("applied option",best_index)
+        print("applied option",best_index,"of",len(options))
         self.g = options[best_index].g.clone()
         self.c += options[best_index].logical_circuit.copy()
         self.frontier = options[best_index].frontier.copy()

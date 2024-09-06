@@ -17,14 +17,16 @@ class ExtractionOption:
     g: BaseGraph[VT,ET]
     frontier: Dict[int,VT]
     architecture: Architecture
-    unchanged: bool
+    rz_cz_had_unchanged: bool
+    gadget_cnot_unchanged: bool
 
-    def __init__(self, graph: BaseGraph[VT,ET], frontier: Dict[int,VT], architecture: Architecture, unchanged: bool=True) -> None:
+    def __init__(self, graph: BaseGraph[VT,ET], frontier: Dict[int,VT], architecture: Architecture, rz_cz_had_unchanged: bool=True, gadget_cnot_unchanged: bool=True) -> None:
         self.logical_circuit = Circuit(graph.num_inputs())
         self.g = graph
         self.frontier = frontier
         self.architecture = architecture
-        self.unchanged = unchanged
+        self.rz_cz_had_unchanged = rz_cz_had_unchanged
+        self.gadget_cnot_unchanged = gadget_cnot_unchanged
 
     def append_gate(self, gate: Gate):
         # print("append gate",gate)
@@ -42,7 +44,8 @@ class ExtractionOption:
             if phase:
                 result_option.append_gate(ZPhase(phase=phase, target=qubit))
                 result_option.g.set_phase(vertex,0)
-                result_option.unchanged = False
+                result_option.rz_cz_had_unchanged = False
+                # result_option.unchanged = False
         
         return result_option
     
@@ -52,7 +55,7 @@ class ExtractionOption:
             for w in set(result_option.g.neighbors(v)).intersection(set(result_option.frontier.values())):
                 result_option.append_gate(CZ(qubit, list(result_option.frontier.values()).index(w)))
                 result_option.g.remove_edge(result_option.g.edge(v,w))
-                result_option.unchanged = False
+                result_option.rz_cz_had_unchanged = False
 
         return result_option
     
@@ -68,7 +71,7 @@ class ExtractionOption:
             result_option.g.remove_vertex(v)
             result_option.g.add_edge(result_option.g.edge(boundary, z_neighbor), EdgeType.SIMPLE)
             result_option.frontier[list(result_option.frontier.values()).index(v)] = z_neighbor
-            result_option.unchanged = False
+            result_option.rz_cz_had_unchanged = False
         
         return result_option
     
@@ -84,7 +87,7 @@ class ExtractionOption:
                     continue
                 
                 current_option = self.copy()
-                current_option.unchanged = False
+                current_option.gadget_cnot_unchanged = False
                 current_option.append_gate(HAD(frontier_qubit))
                 # print("pivot on",root,frontier_neighbor)
 
@@ -131,6 +134,8 @@ class ExtractionOption:
                     current_option.g.add_to_phase(v1,Fraction(1))
 
                 result_list.append(current_option)
+            
+            # break #DEBUG: This reduces number of options drastically
         
         return result_list
     
@@ -141,14 +146,18 @@ class ExtractionOption:
         
         for cnot_addition in cnot_addition_options:
             current_option = self.copy()
-            current_option.unchanged = False
+            current_option.gadget_cnot_unchanged = False
             for cnot in cnot_addition:
                 current_option.append_gate(cnot)
                 target_vertex = current_option.frontier[cnot.control]
                 control_vertex = current_option.frontier[cnot.target]
                 for neighbor in set(current_option.g.neighbors(control_vertex)).difference(set(current_option.g.inputs())):
                     if neighbor in current_option.g.neighbors(target_vertex):
-                        current_option.g.remove_edge(current_option.g.edge(target_vertex, neighbor))
+                        try:
+                            current_option.g.remove_edge(current_option.g.edge(target_vertex, neighbor))
+                        except:
+                            import pdb
+                            pdb.set_trace()
                     else:
                         current_option.g.add_edge(current_option.g.edge(target_vertex, neighbor), EdgeType.HADAMARD)
 
@@ -171,7 +180,7 @@ class ExtractionOption:
             root,top = gadget_dict[current_combination]
             odd_phase = self.g.phase(top) if len(current_combination) % 2 == 1 else -self.g.phase(top)
             current_option = self.copy()
-            current_option.unchanged = False
+            current_option.gadget_cnot_unchanged = False
 
             for combination in get_remaining_combinations(current_combination):
                 odd = len(combination) % 2 == 1
@@ -224,13 +233,14 @@ class ExtractionOption:
                         self.g.set_phase(root, self.g.phase(root)+self.g.phase(v))
                         self.g.remove_vertices([v,n[0]])
                         change = True
+                        self.rz_cz_had_unchanged = False
                         break
             if not change:
                 break
         return self
 
     def copy(self):
-        new = ExtractionOption(self.g.clone(), self.frontier.copy(), copy.deepcopy(self.architecture), self.unchanged)
+        new = ExtractionOption(self.g.clone(), self.frontier.copy(), copy.deepcopy(self.architecture), self.rz_cz_had_unchanged, self.gadget_cnot_unchanged)
         for gate in self.logical_circuit.gates:
             new.logical_circuit.add_gate(gate)
         return new

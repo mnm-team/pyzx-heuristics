@@ -9,6 +9,7 @@ from pyzx.heuristics.extraction.mappers import create_na_mapper
 from pyzx.heuristics.extraction.extractionutils import convert_to_qiskit
 import pandas as pd 
 import os
+import traceback
 
 def evaluate_circuit(c: Circuit, params):
     data = {}
@@ -60,7 +61,7 @@ def evaluate_benchmark_circuits(benchmark='feyn'):
     else:
         circuits = generate_qasm_bench_circuits(benchmark)    
     
-    params = {'edge_bias': [0,0.005,0.05], 'lookahead_iterations': [1], 'config_path': 'architectures/'}
+    params = {'edge_bias': [0,0.005,0.05], 'lookahead_iterations': [1,2], 'config_path': 'architectures/'}
     data = pd.DataFrame()
     for name, circuit in circuits:
         filename = name.split('/')[-1]
@@ -72,6 +73,10 @@ def evaluate_benchmark_circuits(benchmark='feyn'):
             circ_data = evaluate_circuit(circuit, params)
             circ_data['name'] = filename
         except:
+            traceback.print_exc()
+            print('\n')
+            # import pdb
+            # pdb.set_trace()
             continue
 
         data = pd.concat([data,circ_data],ignore_index=True)
@@ -134,4 +139,4 @@ if __name__ == "__main__":
     large (qasm bench large)
     mqt (mqt bench circuits)
     """
-    evaluate_benchmark_circuits(benchmark='feyn')
+    evaluate_benchmark_circuits(benchmark='small')

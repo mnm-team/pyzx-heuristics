@@ -1,4 +1,4 @@
-from pyzx.graph.base import ET, VT, BaseGraph, VertexType
+from pyzx.graph.base import ET, VT, BaseGraph, VertexType, EdgeType
 from pyzx.circuit import Circuit, Gate, CNOT, ZPhase
 from pyzx.linalg import CNOTMaker
 from qiskit import QuantumCircuit
@@ -29,14 +29,13 @@ def get_neighbors_of_frontier(g: BaseGraph[VT, ET], frontier_values: List[VT]) -
         neighbor_set.update(non_start_neighbors)
     return neighbor_set
 
-def get_exclusive_frontier_gadget_dict(g: BaseGraph[VT,ET], frontier: Dict[int, VT], limit_n: int):
-    """returns a dictionary of all gadgets adjacent to only frontier vertices grouped by their degree 
-    (i.e. to how many frontier vertices the gadget is connected to)"""
+def get_exclusive_frontier_gadget_dict(g: BaseGraph[VT,ET], frontier: Dict[int, VT], limit_n: int=None):
+    """returns frontier gadgets as dict with key being the frontier neighbors and value a tuple of (root, top)"""
     frontier_gadgets = get_exclusive_frontier_gadgets(g, frontier)
     gadget_dict = dict()
     for root, top in frontier_gadgets:
         neighbors_in_frontier = set(g.neighbors(root)).difference(set([top]))
-        if len(neighbors_in_frontier) <= limit_n and len(neighbors_in_frontier) > 1:
+        if (not limit_n or len(neighbors_in_frontier) <= limit_n) and len(neighbors_in_frontier) > 1:
             gadget_dict[tuple(neighbors_in_frontier)] = (root,top)
 
     return gadget_dict
@@ -191,3 +190,28 @@ def convert_mapped_circuit(qasm_circuit, num_qubits, initial_mapping=None):
             print("unkown gate",gatename)
 
     return c
+
+def optimize_czs_in_frontier(g: BaseGraph, frontier: Dict[int, VT]):
+    """optimizes czs in a frontier by applying local complementations on phase gadgets so that the number of wires between frontiers decreases
+    effect on overall runtime relatively small yet."""
+    gadget_dict = get_exclusive_frontier_gadget_dict(g, frontier)
+    for gadget_neighbors in gadget_dict.keys():
+        gadget_root, gadget_top = gadget_dict[gadget_neighbors]
+        if g.subgraph_from_vertices(gadget_neighbors).num_edges() > len(gadget_neighbors)*(len(gadget_neighbors)-1)/4:
+            #lcomp removes more edges in the frontier set than it creates
+            print("complemented away czs")
+            complement_neighbors(g, list(gadget_neighbors))
+            for neighbor in gadget_neighbors:
+                g.set_phase(neighbor, g.phase(neighbor)+Fraction(1,2))
+            g.set_phase(gadget_top, g.phase(gadget_top)-Fraction(1,2))
+
+def complement_neighbors(g: BaseGraph, vn: List[VT]):
+    """complements connections between a set of vertices, i.e. everything connected gets disconnected and vice versa"""
+    vn.sort()
+    for n in vn:
+        # flip edges
+        for n2 in vn[vn.index(n)+1:]:
+            if g.connected(n,n2):
+                g.remove_edge(g.edge(n,n2))
+            else:
+                g.add_edge(g.edge(n,n2), EdgeType.HADAMARD)
